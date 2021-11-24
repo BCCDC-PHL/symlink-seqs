@@ -116,7 +116,7 @@ def has_necessary_fields_for_symlinking_nextseq(sample):
     return selected
 
 
-def create_symlinks(samples, sequencer_type, run_dir, outdir):
+def create_symlinks(samples, sequencer_type, run_dir, outdir, simplify_sample_id):
     if not os.path.exists(outdir):
         os.makedirs(outdir)
 
@@ -134,9 +134,20 @@ def create_symlinks(samples, sequencer_type, run_dir, outdir):
         sample_fastq_gz_files = glob.glob(os.path.join(run_dir, fastq_subdir, sample_id + '_*.fastq.gz'))
         for sample_fastq_file in sample_fastq_files + sample_fastq_gz_files:
             if os.path.exists(sample_fastq_file):
+                src = os.path.abspath(sample_fastq_file)
+                dest_filename = os.path.basename(sample_fastq_file)
+                if simplify_sample_id:
+                    read = ""
+                    if re.search('_R1_', dest_filename):
+                        read = 'R1'
+                    elif re.search('_R2_', dest_filename):
+                        read = 'R2'
+                    extension = '.fastq'
+                    if dest_filename.split('.')[-1] == 'gz':
+                        extension += '.gz'
+                    dest_filename = dest_filename.split('_')[0] + '_' + read + extension
+                dest = os.path.join(outdir, dest_filename)
                 try:
-                    src = os.path.abspath(sample_fastq_file)
-                    dest = os.path.join(outdir, os.path.basename(sample_fastq_file))
                     os.symlink(src, dest)
                 except OSError as e:
                     print(str(e) + ". sample_id: " + sample_id + ", file: " + dest)
@@ -146,6 +157,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-r', '--run-dir')
     parser.add_argument('-p', '--project-id')
+    parser.add_argument('-s', '--simplify-sample-id', action='store_true')
     parser.add_argument('-o', '--outdir')
     args = parser.parse_args()
 
@@ -165,7 +177,7 @@ def main():
         candidate_samples = filter(has_necessary_fields_for_symlinking_nextseq, all_samples)
         selected_samples = filter(lambda x: x['project_name'] == args.project_id, candidate_samples)
 
-    create_symlinks(selected_samples, sequencer_type, args.run_dir, args.outdir)
+    create_symlinks(selected_samples, sequencer_type, args.run_dir, args.outdir, args.simplify_sample_id)
 
 
 if __name__ == '__main__':
