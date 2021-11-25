@@ -83,6 +83,9 @@ def has_necessary_fields_for_symlinking_miseq(sample):
     conditions = []
     if 'sample_name' in sample and sample['sample_name'] != "":
         conditions.append(True)
+    elif 'sample_id' in sample and sample['sample_id'] != "":
+        sample['sample_name'] = sample['sample_id']
+        conditions.append(True)
     else:
         conditions.append(False)
 
