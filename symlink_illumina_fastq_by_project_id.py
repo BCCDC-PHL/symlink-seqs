@@ -149,7 +149,7 @@ def get_src_dest_paths(samples, sequencer_type, run_dir, outdir, simplify_sample
     outdir: destination dir to create symlinks or copies
     simplify_sample_id: bool If True, sample ID will be truncated at first '_' char.
 
-    Returns a list of dicts with keys "src" and "dest"
+    Returns a list of dicts with keys "src", "dest" and "sample_id"
     """
     src_dest = []
     fastq_subdir = None
@@ -158,6 +158,7 @@ def get_src_dest_paths(samples, sequencer_type, run_dir, outdir, simplify_sample
     elif sequencer_type == "nextseq":
         fastq_subdir = "Analysis/1/Data/fastq"
     for sample in samples:
+        sample_id = None
         if sequencer_type == 'miseq':
             sample_id = sample['sample_name']
         elif sequencer_type == 'nextseq':
@@ -168,6 +169,7 @@ def get_src_dest_paths(samples, sequencer_type, run_dir, outdir, simplify_sample
             if os.path.exists(sample_fastq_file):
                 src = os.path.abspath(sample_fastq_file)
                 dest_filename = os.path.basename(sample_fastq_file)
+                sample_id = dest_filename.split('_')[0]
                 if simplify_sample_id:
                     read = ""
                     if re.search('_R1_', dest_filename):
@@ -177,9 +179,9 @@ def get_src_dest_paths(samples, sequencer_type, run_dir, outdir, simplify_sample
                     extension = '.fastq'
                     if dest_filename.split('.')[-1] == 'gz':
                         extension += '.gz'
-                    dest_filename = dest_filename.split('_')[0] + '_' + read + extension
+                    dest_filename = sample_id + '_' + read + extension
                 dest = os.path.join(outdir, dest_filename)
-                src_dest.append({"src": src, "dest": dest})
+                src_dest.append({"src": src, "dest": dest, "sample_id": sample_id})
 
     return src_dest        
 
@@ -211,10 +213,22 @@ def create_copies(src_dest_paths):
         shutil.copy(paths['src'], paths['dest'])
 
 
+def parse_ids_file(ids_file_path):
+    """
+    """
+    sample_ids = set()
+    with open(ids_file_path, 'r') as f:
+        for line in f:
+            sample_ids.add(line.strip())
+
+    return sample_ids
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-r', '--run-dir')
     parser.add_argument('-p', '--project-id')
+    parser.add_argument('-i', '--ids-file')
     parser.add_argument('-s', '--simplify-sample-id', action='store_true')
     parser.add_argument('-c', '--copy', action='store_true')
     parser.add_argument('-o', '--outdir')
@@ -238,10 +252,14 @@ def main():
 
     src_dest_paths = get_src_dest_paths(selected_samples, sequencer_type, args.run_dir, args.outdir, args.simplify_sample_id)
 
+    if args.ids_file:
+        selected_sample_ids = parse_ids_file(args.ids_file)
+        src_dest_paths = filter(lambda x: x['sample_id'] in selected_sample_ids, src_dest_paths)
+
     if args.copy:
-      create_copies(src_dest_paths)
+        create_copies(src_dest_paths)
     else:
-      create_symlinks(src_dest_paths)
+        create_symlinks(src_dest_paths)
 
 
 if __name__ == '__main__':
