@@ -198,7 +198,7 @@ def create_symlinks(src_dest_paths):
         try:
             os.symlink(paths['src'], paths['dest'])
         except OSError as e:
-            print(str(e) + ". files: " + paths)
+            print(str(e) + ". files: " + paths['src'] + ", " + paths['dest'])
 
 
 def create_copies(src_dest_paths):
