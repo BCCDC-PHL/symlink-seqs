@@ -15,3 +15,14 @@ optional arguments:
   -c, --copy
   -o OUTDIR, --outdir OUTDIR
 ```
+
+For example:
+
+To collect all of the fastq files from project `project-01` on run `220502_M00123_0321_000000000-AAABC` under a directory called `symlinks`, run the following:
+```
+symlink_illumina_fastq_by_project_id.py -r /path/to/run/220502_M00123_0321_000000000-AAABC -p project-01 -o ./symlinks
+```
+
+If you add the `-s` (or `--simplify-sample-id`) flag, then the filenames of the symlinks will be simplified to only `sample-id_R1.fastq.gz`, instead of the original `sample-id_S01_L001_R1_001.fastq.gz` as they are named in the original sequencer output directory.
+
+Adding the `-c` (or `--copy`) flag will create copies of the files instead of symlinks. Be aware of the extra data storage implications of creating copies.
