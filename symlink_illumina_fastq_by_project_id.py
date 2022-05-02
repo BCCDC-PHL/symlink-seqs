@@ -141,6 +141,14 @@ def has_necessary_fields_for_symlinking_nextseq(sample):
     return selected
 
 
+def get_latest_fastq_subdir(run_dir):
+    analysis_subdirs = os.listdir(os.path.join(run_dir, "Analysis"))
+    latest_analysis_subdir = analysis_subdirs[-1]
+    latest_fastq_subdir = os.path.join("Analysis", latest_analysis_subdir, "Data", "fastq")
+    
+    return latest_fastq_subdir
+
+
 def get_src_dest_paths(samples, sequencer_type, run_dir, outdir, simplify_sample_id):
     """
     samples: List of dicts, with keys "sample_name" OR "sample_id"
@@ -156,7 +164,7 @@ def get_src_dest_paths(samples, sequencer_type, run_dir, outdir, simplify_sample
     if sequencer_type == "miseq":
         fastq_subdir = "Data/Intensities/BaseCalls"
     elif sequencer_type == "nextseq":
-        fastq_subdir = "Analysis/1/Data/fastq"
+        fastq_subdir = get_latest_fastq_subdir(run_dir)
     for sample in samples:
         sample_id = None
         if sequencer_type == 'miseq':
