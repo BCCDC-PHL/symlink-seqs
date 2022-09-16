@@ -141,12 +141,12 @@ def has_necessary_fields_for_symlinking_nextseq(sample):
     return selected
 
 
-def get_latest_fastq_subdir(run_dir):
+def get_latest_analysis_subdir(run_dir):
     analysis_subdirs = os.listdir(os.path.join(run_dir, "Analysis"))
-    latest_analysis_subdir = analysis_subdirs[-1]
-    latest_fastq_subdir = os.path.join("Analysis", latest_analysis_subdir, "Data", "fastq")
+    latest_analysis_subdir_num = analysis_subdirs[-1]
+    latest_analysis_subdir = os.path.abspath(os.path.join(run_dir, "Analysis", latest_analysis_subdir_num))
     
-    return latest_fastq_subdir
+    return latest_analysis_subdir
 
 
 def get_src_dest_paths(samples, sequencer_type, run_dir, outdir, simplify_sample_id):
@@ -164,7 +164,7 @@ def get_src_dest_paths(samples, sequencer_type, run_dir, outdir, simplify_sample
     if sequencer_type == "miseq":
         fastq_subdir = "Data/Intensities/BaseCalls"
     elif sequencer_type == "nextseq":
-        fastq_subdir = get_latest_fastq_subdir(run_dir)
+        fastq_subdir = os.path.join(get_latest_analysis_subdir(run_dir), 'Data', 'fastq')
     for sample in samples:
         sample_id = None
         if sequencer_type == 'miseq':
@@ -252,7 +252,8 @@ def main():
         selected_samples = filter(lambda x: x['sample_project'] == args.project_id, candidate_samples)
         
     elif sequencer_type == 'nextseq':
-        samplesheet_paths = glob.glob(os.path.join(args.run_dir, 'SampleSheet*.csv'))
+        analysis_subdir = get_latest_analysis_subdir(args.run_dir)
+        samplesheet_paths = glob.glob(os.path.join(analysis_subdir, 'Data', 'SampleSheet*.csv'))
         samplesheet_path = samplesheet_paths[0] # If multiple samplesheets exist, how do we choose the correct one?
         all_samples = parse_samplesheet_nextseq(samplesheet_path)
         candidate_samples = filter(has_necessary_fields_for_symlinking_nextseq, all_samples)
