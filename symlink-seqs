@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import csv
 import glob
 import json
 import os
@@ -83,7 +84,7 @@ def camel_to_snake(name):
 def determine_sequencer_type(run_id):
     """
     Determine sequencer type based on format of Run ID
-    Returns str ("miseq" or "nextseq")
+    Returns str ("miseq", "nextseq" or "gridion")
 
     :param run_id:
     :type run_id: str
@@ -92,11 +93,15 @@ def determine_sequencer_type(run_id):
     """
     miseq_regex = '\d{6}_M\d{5}_\d{4}_\d{9}-[A-Z0-9]{5}'
     nextseq_regex = '\d{6}_VH\d{5}_\d+_[A-Z0-9]{9}'
+    gridion_regex = '\d{8}_\d{4}_X\d_[A-Z]{3}\d+_[a-z0-9]{8}'
+
     sequencer_type = None
     if re.match(miseq_regex, run_id):
         sequencer_type = "miseq"
     elif re.match(nextseq_regex, run_id):
         sequencer_type = "nextseq"
+    elif re.match(gridion_regex, run_id):
+        sequencer_type = "gridion"
 
     return sequencer_type
 
@@ -169,6 +174,29 @@ def parse_samplesheet_nextseq(samplesheet_path):
     return cloud_data
 
 
+def parse_samplesheet_gridion_custom(samplesheet_path):
+    """
+    Parse a custom GridION SampleSheet to get sample and project IDs.
+    Custom GridION SampleSheets are simple .csv files that must have the following three fields:
+
+    sample_id
+    barcode
+    project_id
+
+    :param samplesheet_path:
+    :type samplesheet_path: str
+    :return: 
+    :rtype:
+    """
+    samples = []
+    with open(samplesheet_path, 'r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            samples.append(row)
+
+    return samples
+
+
 def has_necessary_fields_for_symlinking_miseq(sample):
     """
     Check if a 'sample' dictionary has the necessary fields for symlinking
@@ -228,6 +256,34 @@ def has_necessary_fields_for_symlinking_nextseq(sample):
     return selected
 
 
+def has_necessary_fields_for_symlinking_gridion(sample):
+    """
+    Check if a 'sample' dictionary has the necessary fields for symlinking
+    Returns bool (True if ready for symlinking, false otherwise)
+
+    :param sample:
+    :type sample: dict[str, str]
+    :return: Whether or not the sample has the appropriate fields necessary for symlinking
+    :rtype bool:
+    """
+    selected = False
+    conditions = []
+    if 'sample_id' in sample and sample['sample_id'] != "":
+        conditions.append(True)
+    else:
+        conditions.append(False)
+
+    if 'project_id' in sample and sample['project_id'] != "":
+        conditions.append(True)
+    else:
+        conditions.append(False)
+
+    if all(conditions):
+        selected = True
+
+    return selected
+
+
 def get_latest_analysis_subdir(run_dir):
     """
     For nextseq runs, there may be multiple `Analysis` sub-directories. We want to symlink to the files in the latest one.
@@ -244,63 +300,6 @@ def get_latest_analysis_subdir(run_dir):
     return latest_analysis_subdir
 
 
-def get_src_dest_paths(config, run_dir, samples, sequencer_type):
-    """
-    samples: List of dicts, with keys "sample_name" OR "sample_id"
-    sequencer_type: str ("miseq" or "nextseq")
-    run_dir: path to illumina sequencer output directory
-    outdir: destination dir to create symlinks or copies
-    simplify_sample_id: bool If True, sample ID will be truncated at first '_' char.
-
-    Returns a list of dicts with keys "src", "dest" and "sample_id"
-
-    :param samples:
-    :type samples: list[dict[str, str]]
-    :param sequencer_type:
-    :type sequencer_type: str
-    :param run_dir:
-    :type run_dir: str
-    :param outdir
-    """
-    
-    
-    src_dest = []
-    fastq_subdir = None
-    if sequencer_type == "miseq":
-        fastq_subdir = "Data/Intensities/BaseCalls"
-    elif sequencer_type == "nextseq":
-        fastq_subdir = os.path.join(get_latest_analysis_subdir(run_dir), 'Data', 'fastq')
-    for sample in samples:
-        sample_id = None
-        if sequencer_type == 'miseq':
-            sample_id = sample['sample_name']
-        elif sequencer_type == 'nextseq':
-            sample_id = sample['sample_id']
-        sample_fastq_files = glob.glob(os.path.join(run_dir, fastq_subdir, sample_id + '_*.fastq'))
-        sample_fastq_gz_files = glob.glob(os.path.join(run_dir, fastq_subdir, sample_id + '_*.fastq.gz'))
-        for sample_fastq_file in sample_fastq_files + sample_fastq_gz_files:
-            if os.path.exists(sample_fastq_file):
-                src = os.path.abspath(sample_fastq_file)
-                dest_filename = os.path.basename(sample_fastq_file)
-                sample_id = dest_filename.split('_')[0]
-                if simplify_sample_id:
-                    read = ""
-                    if re.search('_R1_', dest_filename):
-                        read = 'R1'
-                    elif re.search('_R2_', dest_filename):
-                        read = 'R2'
-                    extension = '.fastq'
-                    if dest_filename.split('.')[-1] == 'gz':
-                        extension += '.gz'
-                    dest_filename = sample_id + '_' + read + extension
-
-                dest = os.path.join(outdir, dest_filename)
-
-                src_dest.append({"src": src, "dest": dest, "sample_id": sample_id})
-
-    return src_dest
-
-
 def create_symlinks(src_dest_paths):
     """
     src_dest_paths: list of dicts with keys "src" and "dest"
@@ -313,13 +312,20 @@ def create_symlinks(src_dest_paths):
         try:
             os.symlink(paths['src'], paths['dest'])
         except OSError as e:
-            print(str(e) + ". files: " + paths['src'] + ", " + paths['dest'])
+            if e.errno == 17:
+                pass
+            else:
+                print(str(e) + ". files: " + paths['src'] + ", " + paths['dest'], file=sys.stderr)
 
 
 def create_copies(src_dest_paths):
     """
-    src_dest_paths: list of dicts with keys "src" and "dest"
     Copy src to dest for each element in src_dest_paths
+
+    :param src_dest_paths: list of dicts with keys "src" and "dest"
+    :type src_dest_paths: list[dict[str, str]]
+    :return: None
+    :rtype: NoneType
     """
     for paths in src_dest_paths:
         outdir = os.path.dirname(paths['dest'])
@@ -330,6 +336,12 @@ def create_copies(src_dest_paths):
 
 def parse_ids_file(ids_file_path):
     """
+    Parse the user-supplied sample IDs file.
+
+    :param ids_file_path: Path to sample IDs file. Should contain one sample ID per line.
+    :type ids_file_path: str
+    :return: Set of sample IDs
+    :rtype: set[str]
     """
     sample_ids = set()
     with open(ids_file_path, 'r') as f:
@@ -339,11 +351,47 @@ def parse_ids_file(ids_file_path):
     return sample_ids
 
 
+def simplify_fastq_filename(sample_id, original_filename):
+    """
+    Simplify fastq filename of destination symlink/copy by removing SXX_L001_R{1,2}_001, replacing simply with R1, R2 or RL.
+
+    :param sample_id:
+    :type sample_id: str
+    :param original_filename:
+    :type original_filename:
+    :return:
+    :rtype: str
+    """
+    read = ""
+    if re.search('_R1_', original_filename):
+        read = 'R1'
+    elif re.search('_R2_', original_filename):
+        read = 'R2'
+    elif re.search('_RL', original_filename):
+        read = 'RL'
+    extension = '.fastq'
+    if original_filename.split('.')[-1] == 'gz':
+        extension += '.gz'
+
+    dest_filename = sample_id + '_' + read + extension
+
+    return dest_filename
+
+
 def get_fastq_paths(config, run_dir, sample_ids):
     """
-    
+    Get paths to source and destination of fastq files.
+
+    :param config:
+    :type config: dict[str, object]
+    :param run_dir:
+    :type run_dir: str
+    :param sample_ids:
+    :type sample_ids: Iterable
+    :return: List of dicts with the keys: src, dest, sample_id
+    :rtype: list[dict[str, str]]
     """
-    
+
     run_id = os.path.basename(run_dir.rstrip('/'))
     sequencer_type = determine_sequencer_type(run_id)
     selected_samples = []
@@ -361,10 +409,27 @@ def get_fastq_paths(config, run_dir, sample_ids):
         analysis_subdir = get_latest_analysis_subdir(run_dir)
         fastq_subdir = os.path.join(analysis_subdir, 'Data', 'fastq')
         samplesheet_paths = glob.glob(os.path.join(analysis_subdir, 'Data', 'SampleSheet*.csv'))
-        samplesheet_path = samplesheet_paths[0] # If multiple samplesheets exist, how do we choose the correct one?
-        all_samples = parse_samplesheet_nextseq(samplesheet_path)
+        if len(samplesheet_paths) > 0:
+            samplesheet_path = samplesheet_paths[0] # If multiple samplesheets exist, how do we choose the correct one?
+            all_samples = parse_samplesheet_nextseq(samplesheet_path)
+        else:
+            print("WARNING: Failed to find SampleSheet in: " + run_dir, sys.stderr)
+            all_samples = []
         candidate_samples = filter(has_necessary_fields_for_symlinking_nextseq, all_samples)
         selected_samples = filter(lambda x: x['sample_id'] in sample_ids, candidate_samples)
+
+    elif sequencer_type == 'gridion':
+        fastq_subdir = "fastq_pass_combined"
+        samplesheet_paths = glob.glob(os.path.join(run_dir, 'SampleSheet*.csv'))
+        if len(samplesheet_paths) > 0:
+            samplesheet_path = samplesheet_paths[0]
+            all_samples = parse_samplesheet_gridion_custom(samplesheet_path)
+        else:
+            print("WARNING: Failed to find SampleSheet in: " + run_dir, file=sys.stderr)
+            all_samples = []
+        candidate_samples = filter(has_necessary_fields_for_symlinking_gridion, all_samples)
+        selected_samples = filter(lambda x: x['sample_id'] in sample_ids, candidate_samples)
+
 
     # Skip run if fastq_subdir cannot be determined
     if fastq_subdir is None:
@@ -375,6 +440,8 @@ def get_fastq_paths(config, run_dir, sample_ids):
         if sequencer_type == 'miseq':
             sample_id = sample['sample_name']
         elif sequencer_type == 'nextseq':
+            sample_id = sample['sample_id']
+        elif sequencer_type == 'gridion':
             sample_id = sample['sample_id']
 
         if sample_id is None:
@@ -389,15 +456,7 @@ def get_fastq_paths(config, run_dir, sample_ids):
                 dest_filename = os.path.basename(sample_fastq_file)
                 sample_id = dest_filename.split('_')[0]
                 if config['simplify_sample_id']:
-                    read = ""
-                    if re.search('_R1_', dest_filename):
-                        read = 'R1'
-                    elif re.search('_R2_', dest_filename):
-                        read = 'R2'
-                    extension = '.fastq'
-                    if dest_filename.split('.')[-1] == 'gz':
-                        extension += '.gz'
-                    dest_filename = sample_id + '_' + read + extension
+                    dest_filename = simplify_fastq_filename(sample_id, dest_filename)
 
                 dest = os.path.join(config['outdir'], dest_filename)
 
@@ -425,15 +484,14 @@ def main(args):
 
             if config['copy']:
                 create_copies(fastq_paths)
-                pass
             else:
                 create_symlinks(fastq_paths)
-                pass
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-p', '--project-id')
+    parser.add_argument('-r', '--run-id')
     parser.add_argument('-i', '--ids-file')
     parser.add_argument('-s', '--simplify-sample-id', action='store_true')
     parser.add_argument('-c', '--config', default=os.path.expanduser('~/.config/symlink-seqs/config.json'))
