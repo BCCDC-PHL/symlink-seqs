@@ -5,8 +5,10 @@ import csv
 import glob
 import json
 import os
+import shutil
 import sys
 import re
+
 
 def jdump(x):
     """
@@ -104,6 +106,49 @@ def determine_sequencer_type(run_id):
         sequencer_type = "gridion"
 
     return sequencer_type
+
+
+def determine_miseq_directory_structure(run_dir_path):
+    """
+    Determine whether a MiSeq run directory follows the "old" or "new" directory structure.
+    In the "old" structure, fastq files are always found under "Data/Intensities/BaseCalls".
+    In the "new" structure, fastq files are found under "Alignment_N/DATE_TIME/Fastq"
+
+    :param run_dir_path:
+    :type run_dir_path: str
+    :return: "old" or "new"
+    :rtype: str
+    """
+
+    run_dir_contents = os.listdir(run_dir_path)
+    if "Alignment_1" in run_dir_contents:
+        old_or_new = "new"
+    else:
+        old_or_new = "old"
+
+    return old_or_new
+
+
+def find_miseq_fastq_subdir(run_dir_path):
+    """
+    Find the sub-directory where fastq files are located.
+    MiSeq runs may follow an 'old' or 'new' directory structure.
+
+    :param run_dir_path:
+    :type run_dir_path: str
+    :return: fastq subdir
+    :rtype: str
+    """
+    fastq_subdir = None
+    directory_structure = determine_miseq_directory_structure(run_dir_path)
+    if directory_structure == "old":
+        fastq_subdir = "Data/Intensities/BaseCalls"
+    elif directory_structure == "new":
+        fastq_dirs = glob.glob(os.path.join(run_dir_path, 'Alignment_*', '*', 'Fastq'))
+        fastq_dir = fastq_dirs[-1]
+        fastq_subdir = os.path.relpath(fastq_dir, run_dir_path)
+
+    return fastq_subdir
 
 
 def parse_samplesheet_miseq(samplesheet_path):
@@ -399,7 +444,7 @@ def get_fastq_paths(config, run_dir, sample_ids):
     fastq_paths = []
 
     if sequencer_type == 'miseq':
-        fastq_subdir = "Data/Intensities/BaseCalls"
+        fastq_subdir = find_miseq_fastq_subdir(run_dir)
         samplesheet_path = os.path.join(run_dir, 'SampleSheet.csv')
         all_samples = parse_samplesheet_miseq(samplesheet_path)
         candidate_samples = filter(has_necessary_fields_for_symlinking_miseq, all_samples)
