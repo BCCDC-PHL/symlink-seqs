@@ -335,12 +335,16 @@ def get_latest_analysis_subdir(run_dir):
 
     :param run_dir:
     :type run_dir: str
-    :return: Path to latest analysis subdir.
-    :rtype: str
+    :return: Path to latest analysis subdir, or None if the Analysis dir does not exist.
+    :rtype: str|None
     """
-    analysis_subdirs = os.listdir(os.path.join(run_dir, "Analysis"))
-    latest_analysis_subdir_num = analysis_subdirs[-1]
-    latest_analysis_subdir = os.path.abspath(os.path.join(run_dir, "Analysis", latest_analysis_subdir_num))
+    analysis_dir = os.path.join(os.path.join(run_dir, "Analysis"))
+    if os.path.exists(analysis_dir):
+        analysis_subdirs = os.listdir(analysis_dir)
+        latest_analysis_subdir_num = analysis_subdirs[-1]
+        latest_analysis_subdir = os.path.abspath(os.path.join(run_dir, "Analysis", latest_analysis_subdir_num))
+    else:
+        latest_analysis_subdir = None
     
     return latest_analysis_subdir
 
@@ -452,16 +456,19 @@ def get_fastq_paths(config, run_dir, sample_ids):
         
     elif sequencer_type == 'nextseq':
         analysis_subdir = get_latest_analysis_subdir(run_dir)
-        fastq_subdir = os.path.join(analysis_subdir, 'Data', 'fastq')
-        samplesheet_paths = glob.glob(os.path.join(analysis_subdir, 'Data', 'SampleSheet*.csv'))
-        if len(samplesheet_paths) > 0:
-            samplesheet_path = samplesheet_paths[0] # If multiple samplesheets exist, how do we choose the correct one?
-            all_samples = parse_samplesheet_nextseq(samplesheet_path)
+        if analysis_subdir is not None:
+            fastq_subdir = os.path.join(analysis_subdir, 'Data', 'fastq')
+            samplesheet_paths = glob.glob(os.path.join(analysis_subdir, 'Data', 'SampleSheet*.csv'))
+            if len(samplesheet_paths) > 0:
+                samplesheet_path = samplesheet_paths[0] # If multiple samplesheets exist, how do we choose the correct one?
+                all_samples = parse_samplesheet_nextseq(samplesheet_path)
+            else:
+                print("WARNING: Failed to find SampleSheet in: " + run_dir, file=sys.stderr)
+                all_samples = []
+            candidate_samples = filter(has_necessary_fields_for_symlinking_nextseq, all_samples)
+            selected_samples = filter(lambda x: x['sample_id'] in sample_ids, candidate_samples)
         else:
-            print("WARNING: Failed to find SampleSheet in: " + run_dir, sys.stderr)
-            all_samples = []
-        candidate_samples = filter(has_necessary_fields_for_symlinking_nextseq, all_samples)
-        selected_samples = filter(lambda x: x['sample_id'] in sample_ids, candidate_samples)
+            selected_samples = []
 
     elif sequencer_type == 'gridion':
         fastq_subdir = "fastq_pass_combined"
