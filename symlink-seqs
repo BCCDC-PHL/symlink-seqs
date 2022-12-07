@@ -63,6 +63,8 @@ def merge_config_with_args(config, args):
         config['outdir'] = args.outdir
     if 'copy' not in config:
         config['copy'] = args.copy
+    if 'csv' not in config:
+        config['csv'] = args.csv
     if 'project_id' not in config:
         config['project_id'] = args.project_id
 
@@ -517,7 +519,37 @@ def get_fastq_paths(config, run_dir, sample_ids):
                 fastq_paths.append({"src": src, "dest": dest, "sample_id": sample_id})
 
     return fastq_paths
+
+
+def determine_read_type(fastq_path):
+    """
+    """
+    read_type = None
+    read_type_regex = "_(R[12])[_\\.]"
+    read_type_match = re.search(read_type_regex, fastq_path)
+    if read_type_match:
+        read_type = read_type_match.group(1)
+
+    return read_type
     
+
+def pair_fastq_paths(fastq_paths):
+    """
+    """
+    paired_fastq_paths_by_sample_id = {}
+    for fastq_path in fastq_paths:
+        sample_id = fastq_path['sample_id']
+        read_type = determine_read_type(fastq_path['src'])
+        if sample_id not in paired_fastq_paths_by_sample_id:
+            paired_fastq_paths_by_sample_id[sample_id] = {'ID': sample_id}
+            paired_fastq_paths_by_sample_id[sample_id][read_type] = fastq_path['src']
+        else:
+            paired_fastq_paths_by_sample_id[sample_id][read_type] = fastq_path['src']
+
+    paired_fastq_paths = sorted(paired_fastq_paths_by_sample_id.values(), key=lambda x: x['ID'])
+
+    return paired_fastq_paths
+
 
 
 def main(args):
@@ -528,6 +560,11 @@ def main(args):
     
     sample_ids = parse_ids_file(args.ids_file)
 
+    if config['csv']:
+        output_fieldnames = ['ID', 'R1', 'R2']
+        writer = csv.DictWriter(sys.stdout, fieldnames=output_fieldnames)
+        writer.writeheader()
+        
     for run_parent_dir in config['sequencing_run_parent_dirs']:
         run_parent_dir_contents = list(map(lambda x: os.path.abspath(os.path.join(run_parent_dir, x)), os.listdir(run_parent_dir)))
 
@@ -538,6 +575,13 @@ def main(args):
 
             if config['copy']:
                 create_copies(fastq_paths)
+            elif config['csv']:
+                paired_fastq_paths = pair_fastq_paths(fastq_paths)
+                if len(paired_fastq_paths) > 0:
+                    output_fieldnames = ['ID', 'R1', 'R2']
+                    writer = csv.DictWriter(sys.stdout, fieldnames=output_fieldnames)
+                    for row in paired_fastq_paths:
+                        writer.writerow(row)
             else:
                 create_symlinks(fastq_paths)
 
@@ -550,6 +594,7 @@ if __name__ == '__main__':
     parser.add_argument('-s', '--simplify-sample-id', action='store_true')
     parser.add_argument('-c', '--config', default=os.path.expanduser('~/.config/symlink-seqs/config.json'))
     parser.add_argument('--copy', action='store_true')
+    parser.add_argument('--csv', action='store_true')
     parser.add_argument('-o', '--outdir', default='.')
     args = parser.parse_args()
     main(args)
