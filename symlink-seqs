@@ -157,10 +157,10 @@ def parse_samplesheet_miseq(samplesheet_path):
     """
     Parse a MiSeq SampleSheet to get sample and project IDs
 
-    :param samplesheet_path:
+    :param samplesheet_path: SampleSheet.csv file.
     :type samplesheet_path: str
-    :return: 
-    :rtype:
+    :return: List of sample records from SampleSheet.
+    :rtype: list[dict[str, object]]
     """
     data = []
     with open(samplesheet_path, 'r') as f:
@@ -189,10 +189,10 @@ def parse_samplesheet_nextseq(samplesheet_path):
     """
     Parse a NextSeq SampleSheet to get sample and project IDs
 
-    :param samplesheet_path:
+    :param samplesheet_path: Path to SampleSheet.csv file.
     :type samplesheet_path: str
-    :return: 
-    :rtype:
+    :return: List of sample records from SampleSheet.
+    :rtype: list[dict[str, object]]
     """
     cloud_data_lines = []
     cloud_data = []
@@ -355,8 +355,12 @@ def get_latest_analysis_subdir(run_dir):
 
 def create_symlinks(src_dest_paths):
     """
-    src_dest_paths: list of dicts with keys "src" and "dest"
     Symlink src to dest for each element in src_dest_paths
+
+    :param src_dest_paths: list of dicts with keys "src" and "dest"
+    :type src_dest_paths: list[dict[str, str]]
+    :return: None
+    :rtype: NoneType
     """
     for paths in src_dest_paths:
         outdir = os.path.dirname(paths['dest'])
@@ -523,9 +527,15 @@ def get_fastq_paths(config, run_dir, sample_ids):
 
 def determine_read_type(fastq_path):
     """
+    Determine whether the fastq is an R1, R2 or RL file.
+
+    :param fastq_paths:
+    :type fastq_paths: str 
+    :return: "R1" "R2" or "RL", or None if the read type cannot be determined.
+    :rtype: str|None
     """
     read_type = None
-    read_type_regex = "_(R[12])[_\\.]"
+    read_type_regex = "_(R[12L])[_\\.]"
     read_type_match = re.search(read_type_regex, fastq_path)
     if read_type_match:
         read_type = read_type_match.group(1)
@@ -535,6 +545,12 @@ def determine_read_type(fastq_path):
 
 def pair_fastq_paths(fastq_paths):
     """
+    Determine whether the fastq is an R1, R2 or RL file.
+
+    :param fastq_paths: List of dicts with fields: ['sample_id', 'src']
+    :type fastq_paths: list[dict[str, str]]
+    :return: List of dicts with fields: ['ID', 'R1', 'R2']
+    :rtype: list[dict[str, str]]
     """
     paired_fastq_paths_by_sample_id = {}
     for fastq_path in fastq_paths:
@@ -560,11 +576,13 @@ def main(args):
     
     sample_ids = parse_ids_file(args.ids_file)
 
+    # In csv-mode, need to write the header once, before we start
+    # looping over runs.
     if config['csv']:
         output_fieldnames = ['ID', 'R1', 'R2']
         writer = csv.DictWriter(sys.stdout, fieldnames=output_fieldnames)
         writer.writeheader()
-        
+
     for run_parent_dir in config['sequencing_run_parent_dirs']:
         run_parent_dir_contents = list(map(lambda x: os.path.abspath(os.path.join(run_parent_dir, x)), os.listdir(run_parent_dir)))
 
@@ -590,11 +608,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-p', '--project-id')
     parser.add_argument('-r', '--run-id')
-    parser.add_argument('-i', '--ids-file')
-    parser.add_argument('-s', '--simplify-sample-id', action='store_true')
-    parser.add_argument('-c', '--config', default=os.path.expanduser('~/.config/symlink-seqs/config.json'))
-    parser.add_argument('--copy', action='store_true')
-    parser.add_argument('--csv', action='store_true')
-    parser.add_argument('-o', '--outdir', default='.')
+    parser.add_argument('-i', '--ids-file', help="File of sample IDs (one sample ID per line)")
+    parser.add_argument('-s', '--simplify-sample-id', action='store_true', help="Simplify filenames of symlinks to include only sample-id_R{1,2}.fastq.gz")
+    parser.add_argument('-c', '--config', default=os.path.expanduser('~/.config/symlink-seqs/config.json'), help="Config file (json format).")
+    parser.add_argument('--copy', action='store_true', help="Create copies instead of symlinks.")
+    parser.add_argument('--csv', action='store_true', help="Print csv-format summary of fastq file paths for each sample to stdout.")
+    parser.add_argument('-o', '--outdir', default='.', help="Output directory, where symlinks (or copies) will be created.")
     args = parser.parse_args()
     main(args)
