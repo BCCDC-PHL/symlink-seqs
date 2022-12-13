@@ -31,6 +31,8 @@ ID,R1,R2
 
 ...where `ID` is the sample ID, `R1` is the path to the R1 fastq file, and `R2` is the path to the R2 fastq file.
 
+If a run ID is supplied, then only samples from that run will be symlinked. If no sample IDs file sis supplied, then all samples on that run will be symlinked.
+
 ## Configuration
 
 The tool reads a config file from `~/.config/symlink-seqs/config.json` by default. An alternative config file can be provided using the `-c` or `--config` flags.

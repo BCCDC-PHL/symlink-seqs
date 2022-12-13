@@ -444,7 +444,7 @@ def get_fastq_paths(config, run_dir, sample_ids):
     :param run_dir:
     :type run_dir: str
     :param sample_ids:
-    :type sample_ids: Iterable
+    :type sample_ids: Iterable|NoneType
     :return: List of dicts with the keys: src, dest, sample_id
     :rtype: list[dict[str, str]]
     """
@@ -460,7 +460,10 @@ def get_fastq_paths(config, run_dir, sample_ids):
         samplesheet_path = os.path.join(run_dir, 'SampleSheet.csv')
         all_samples = parse_samplesheet_miseq(samplesheet_path)
         candidate_samples = filter(has_necessary_fields_for_symlinking_miseq, all_samples)
-        selected_samples = filter(lambda x: x['sample_id'] in sample_ids or x['sample_name'] in sample_ids, candidate_samples)
+        if sample_ids is not None:
+            selected_samples = filter(lambda x: x['sample_id'] in sample_ids or x['sample_name'] in sample_ids, candidate_samples)
+        else:
+            selected_samples = all_samples
         
     elif sequencer_type == 'nextseq':
         analysis_subdir = get_latest_analysis_subdir(run_dir)
@@ -573,8 +576,10 @@ def main(args):
     config = {}
     config = parse_config(args.config)
     config = merge_config_with_args(config, args)
-    
-    sample_ids = parse_ids_file(args.ids_file)
+
+    sample_ids = None
+    if args.ids_file is not None:
+        sample_ids = parse_ids_file(args.ids_file)
 
     # In csv-mode, need to write the header once, before we start
     # looping over runs.
@@ -587,6 +592,10 @@ def main(args):
         run_parent_dir_contents = list(map(lambda x: os.path.abspath(os.path.join(run_parent_dir, x)), os.listdir(run_parent_dir)))
 
         run_dirs = list(filter(lambda x: os.path.isdir(x), run_parent_dir_contents))
+
+        # If a run ID is supplied by the `--run-id` flag, only symlink samples for that run.
+        if args.run_id is not None:
+            run_dirs = list(filter(lambda x: os.path.basename(x) == args.run_id, run_dirs))
 
         for run_dir in run_dirs:
             fastq_paths = get_fastq_paths(config, run_dir, sample_ids)
