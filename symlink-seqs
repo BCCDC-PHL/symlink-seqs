@@ -435,7 +435,7 @@ def simplify_fastq_filename(sample_id, original_filename):
     return dest_filename
 
 
-def get_fastq_paths(config, run_dir, sample_ids):
+def get_fastq_paths(config, run_dir, sample_ids, project_id):
     """
     Get paths to source and destination of fastq files.
 
@@ -462,8 +462,10 @@ def get_fastq_paths(config, run_dir, sample_ids):
         candidate_samples = filter(has_necessary_fields_for_symlinking_miseq, all_samples)
         if sample_ids is not None:
             selected_samples = filter(lambda x: x['sample_id'] in sample_ids or x['sample_name'] in sample_ids, candidate_samples)
+        elif project_id is not None:
+            selected_samples = filter(lambda x: x['sample_project'] == project_id, candidate_samples)
         else:
-            selected_samples = all_samples
+            selected_samples = candidate_samples
         
     elif sequencer_type == 'nextseq':
         analysis_subdir = get_latest_analysis_subdir(run_dir)
@@ -479,6 +481,8 @@ def get_fastq_paths(config, run_dir, sample_ids):
             candidate_samples = filter(has_necessary_fields_for_symlinking_nextseq, all_samples)
             if sample_ids is not None:
                 selected_samples = filter(lambda x: x['sample_id'] in sample_ids, candidate_samples)
+            elif project_id is not None:
+                selected_samples = filter(lambda x: x['project_name'] == project_id, candidate_samples)
             else:
                 selected_samples = candidate_samples
         else:
@@ -494,7 +498,12 @@ def get_fastq_paths(config, run_dir, sample_ids):
             print("WARNING: Failed to find SampleSheet in: " + run_dir, file=sys.stderr)
             all_samples = []
         candidate_samples = filter(has_necessary_fields_for_symlinking_gridion, all_samples)
-        selected_samples = filter(lambda x: x['sample_id'] in sample_ids, candidate_samples)
+        if sample_ids is not None:
+            selected_samples = filter(lambda x: x['sample_id'] in sample_ids, candidate_samples)
+        elif project_id is not None:
+            selected_samples = filter(lambda x: x['project_name'] == project_id, candidate_samples)
+        else:
+            selected_samples = candidate_samples
 
 
     # Skip run if fastq_subdir cannot be determined
@@ -601,7 +610,7 @@ def main(args):
             run_dirs = list(filter(lambda x: os.path.basename(x) == args.run_id, run_dirs))
 
         for run_dir in run_dirs:
-            fastq_paths = get_fastq_paths(config, run_dir, sample_ids)
+            fastq_paths = get_fastq_paths(config, run_dir, sample_ids, args.project_id)
 
             if config['copy']:
                 create_copies(fastq_paths)
