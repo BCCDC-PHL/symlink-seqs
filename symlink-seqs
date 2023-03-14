@@ -459,7 +459,12 @@ def get_fastq_paths(config, run_dir, sample_ids, project_id):
         fastq_subdir = find_miseq_fastq_subdir(run_dir)
         samplesheet_path = os.path.join(run_dir, 'SampleSheet.csv')
         all_samples = parse_samplesheet_miseq(samplesheet_path)
-        candidate_samples = filter(has_necessary_fields_for_symlinking_miseq, all_samples)
+        candidate_samples = list(filter(has_necessary_fields_for_symlinking_miseq, all_samples))
+        # Occasionally sample IDs in the SampleSheet will include underscore characters, which are
+        # automatically converted to dashes in the fastq filename. Need to convert them here prior to matching.
+        for sample in candidate_samples:
+            sample['sample_id'] = sample['sample_id'].replace('_', '-')
+            sample['sample_name'] = sample['sample_name'].replace('_', '-')
         if sample_ids is not None:
             selected_samples = filter(lambda x: x['sample_id'] in sample_ids or x['sample_name'] in sample_ids, candidate_samples)
         elif project_id is not None:
@@ -478,7 +483,11 @@ def get_fastq_paths(config, run_dir, sample_ids, project_id):
             else:
                 print("WARNING: Failed to find SampleSheet in: " + run_dir, file=sys.stderr)
                 all_samples = []
-            candidate_samples = filter(has_necessary_fields_for_symlinking_nextseq, all_samples)
+            candidate_samples = list(filter(has_necessary_fields_for_symlinking_nextseq, all_samples))
+            # Occasionally sample IDs in the SampleSheet will include underscore characters, which are
+            # automatically converted to dashes in the fastq filename. Need to convert them here prior to matching.
+            for sample in candidate_samples:
+                sample['sample_id'] = sample['sample_id'].replace('_', '-')
             if sample_ids is not None:
                 selected_samples = filter(lambda x: x['sample_id'] in sample_ids, candidate_samples)
             elif project_id is not None:
