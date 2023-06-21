@@ -147,8 +147,12 @@ def find_miseq_fastq_subdir(run_dir_path):
         fastq_subdir = "Data/Intensities/BaseCalls"
     elif directory_structure == "new":
         fastq_dirs = glob.glob(os.path.join(run_dir_path, 'Alignment_*', '*', 'Fastq'))
-        fastq_dir = fastq_dirs[-1]
-        fastq_subdir = os.path.relpath(fastq_dir, run_dir_path)
+        try:
+            fastq_dir = fastq_dirs[-1]
+            fastq_subdir = os.path.relpath(fastq_dir, run_dir_path)
+        except IndexError as e:
+            print("WARNING: Failed to find fastq_directory in: " + run_dir_path, file=sys.stderr)
+            fastq_subdir = None
 
     return fastq_subdir
 
