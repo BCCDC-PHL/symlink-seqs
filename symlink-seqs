@@ -289,7 +289,6 @@ def has_necessary_fields_for_symlinking_nextseq(sample):
     :return: Whether or not the sample has the appropriate fields necessary for symlinking
     :rtype bool:
     """
-    jdump(sample)
     selected = False
     conditions = []
     if 'sample_id' in sample and sample['sample_id'] != "":
