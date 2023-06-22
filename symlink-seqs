@@ -268,7 +268,7 @@ def has_necessary_fields_for_symlinking_miseq(sample):
     else:
         conditions.append(False)
 
-    if 'sample_project' in sample and sample['sample_project'] != "":
+    if 'sample_project' in sample:
         conditions.append(True)
     else:
         conditions.append(False)
@@ -289,6 +289,7 @@ def has_necessary_fields_for_symlinking_nextseq(sample):
     :return: Whether or not the sample has the appropriate fields necessary for symlinking
     :rtype bool:
     """
+    jdump(sample)
     selected = False
     conditions = []
     if 'sample_id' in sample and sample['sample_id'] != "":
@@ -296,7 +297,7 @@ def has_necessary_fields_for_symlinking_nextseq(sample):
     else:
         conditions.append(False)
 
-    if 'project_name' in sample and sample['project_name'] != "":
+    if 'project_name' in sample:
         conditions.append(True)
     else:
         conditions.append(False)
@@ -324,7 +325,7 @@ def has_necessary_fields_for_symlinking_gridion(sample):
     else:
         conditions.append(False)
 
-    if 'project_id' in sample and sample['project_id'] != "":
+    if 'project_id' in sample:
         conditions.append(True)
     else:
         conditions.append(False)
