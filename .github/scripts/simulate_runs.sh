@@ -1,5 +1,7 @@
 #!/bin/bash
 
+mkdir -p artifacts/simulated_runs/{M00123,M00456,VH00123}/22
+
 timeout 10 java -jar illumina-run-simulator.jar \
 	--config .github/data/illumina-run-simulator/config.edn \
 	2> >(tee artifacts/illumina-run-simulator.log.jsonl) \
