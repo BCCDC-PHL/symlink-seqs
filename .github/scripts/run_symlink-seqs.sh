@@ -1,5 +1,7 @@
 #!/bin/bash
 
+mkdir -p artifacts/symlink-seqs
+
 ./symlink-seqs \
     --config .github/data/symlink-seqs/config.json \
     --project-id 'mysterious_experiment' \
