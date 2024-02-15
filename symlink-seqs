@@ -67,6 +67,8 @@ def merge_config_with_args(config, args):
         config['csv'] = args.csv
     if 'project_id' not in config:
         config['project_id'] = args.project_id
+    if 'skip_qc_status_check' not in config:
+        config['skip_qc_status_check'] = args.skip_qc_status_check
 
     return config
 
@@ -595,6 +597,26 @@ def pair_fastq_paths(fastq_paths):
     return paired_fastq_paths
 
 
+def check_qc_status(run_dir):
+    """
+    Check the status of the QC check for a run.
+
+    :param run_dir:
+    :type run_dir: str
+    :return: "PASS" or "FAIL" (or None if the qc_check_complete.json file does not exist)
+    :rtype: str|None
+    """
+    qc_status = None
+    qc_status_path = os.path.join(run_dir, 'qc_check_complete.json')
+    if os.path.exists(qc_status_path):
+        with open(qc_status_path, 'r') as f:
+            qc_check = json.load(f)
+            qc_status = qc_check['overall_pass_fail']
+    else:
+        print("WARNING: QC check file not found in: " + run_dir, file=sys.stderr)
+
+    return qc_status
+
 
 def main(args):
 
@@ -623,6 +645,12 @@ def main(args):
             run_dirs = list(filter(lambda x: os.path.basename(x) == args.run_id, run_dirs))
 
         for run_dir in run_dirs:
+            if not config['skip_qc_status_check']:
+                qc_status = check_qc_status(run_dir)
+                if qc_status != None and qc_status != 'PASS':
+                    print("WARNING: Skipping run due to failed QC: " + run_dir, file=sys.stderr)
+                    continue
+
             fastq_paths = get_fastq_paths(config, run_dir, sample_ids, args.project_id)
 
             if config['copy']:
@@ -647,6 +675,7 @@ if __name__ == '__main__':
     parser.add_argument('-c', '--config', default=os.path.expanduser('~/.config/symlink-seqs/config.json'), help="Config file (json format).")
     parser.add_argument('--copy', action='store_true', help="Create copies instead of symlinks.")
     parser.add_argument('--csv', action='store_true', help="Print csv-format summary of fastq file paths for each sample to stdout.")
+    parser.add_argument('--skip-qc-status-check', action='store_true', help="Skip checking qc status for runs.")
     parser.add_argument('-o', '--outdir', default='.', help="Output directory, where symlinks (or copies) will be created.")
     args = parser.parse_args()
     main(args)
