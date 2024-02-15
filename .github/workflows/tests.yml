@@ -8,7 +8,12 @@ on:
       - main
   workflow_dispatch:
 jobs:
-  tests:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        python_version: ["3.9", "3.10", "3.11", "3.12"]
+    name: Run tests
     runs-on: ubuntu-latest
     steps:
     - name: Checkout Repo
@@ -31,5 +36,7 @@ jobs:
     - name: Setup Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.10'
-    
+        python-version: ${{ matrix.python_version }}
+    - name: Run symlink-seqs
+      run: |
+        bash .github/scripts/run_symlink-seqs.sh
