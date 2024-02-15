@@ -15,6 +15,7 @@ optional arguments:
   -c CONFIG, --config CONFIG                Config file (json format).
   --copy                                    Create copies instead of symlinks.
   --csv                                     Print csv-format summary of fastq file paths for each sample to stdout.
+  --skip-qc-status-check                    Skip checking qc status for runs.
   -o OUTDIR, --outdir OUTDIR                Output directory, where symlinks (or copies) will be created.
 ```
 
@@ -58,7 +59,8 @@ Additional settings may be added to the config:
 		"/path/to/sequencer-02/output",
 		"/path/to/sequencer-03/output"
 	],
-	"simplify_sample_id": true
+	"simplify_sample_id": true,
+	"skip_qc_status_check": true
 }
 ```
 
@@ -68,6 +70,7 @@ Additional settings may be added to the config:
 | `simplify_sample_id`         | False     | Boolean       |             |
 | `copy`                       | False     | Boolean       | When set to `true`, make copies instead of symlinks               |
 | `csv`                        | False     | Boolean       | When set to `true`, print a csv summary of fastq files per sample |
+| `skip_qc_status_check`       | False     | Boolean       | When set to `true`, the QC status of runs will not be checked     |
 | `outdir`                     | False     | Path          | Directory to create symlinks or copies under                      |
 
 The file must be in valid JSON format.
