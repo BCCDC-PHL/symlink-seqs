@@ -1,4 +1,7 @@
+[![Tests](https://github.com/BCCDC-PHL/symlink-seqs/actions/workflows/tests.yml/badge.svg)](https://github.com/BCCDC-PHL/symlink-seqs/actions/workflows/tests.yml)
+
 # symlink-seqs
+
 Create fastq symlinks for selected samples in sequencer output directories based on project ID from SampleSheet files.
 
 ## Usage

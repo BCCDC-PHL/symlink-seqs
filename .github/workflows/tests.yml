@@ -1,0 +1,44 @@
+name: "Tests"
+on: 
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        python_version: ["3.9", "3.10", "3.11", "3.12"]
+    name: Run tests
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Repo
+      uses: actions/checkout@v1
+    - name: Create artifacts directory
+      run: |
+        mkdir -p artifacts/artifacts
+    - name: Setup Java
+      uses: actions/setup-java@v3
+      with:
+        distribution: 'temurin'
+        java-version: '21'
+    - name: Download Run Simulator
+      run: |
+        bash .github/scripts/download_run_simulator.sh
+    - name: Simulate Runs
+      run: |
+        bash .github/scripts/simulate_runs.sh
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python_version }}
+    - name: Run symlink-seqs
+      run: |
+        bash .github/scripts/run_symlink-seqs.sh
+    - name: Check Outputs
+      run: |
+        bash .github/scripts/check_outputs.sh

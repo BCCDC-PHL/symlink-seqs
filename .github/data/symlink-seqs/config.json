@@ -1,0 +1,8 @@
+{
+    "sequencing_run_parent_dirs": [
+	"artifacts/simulated_runs/M00123/22",
+	"artifacts/simulated_runs/M00456/22",
+	"artifacts/simulated_runs/VH00123/22"
+    ],
+    "simplify_sample_id": true
+}
