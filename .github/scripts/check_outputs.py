@@ -40,7 +40,6 @@ def parse_symlink_seqs_output_csv(symlink_seqs_output_csv):
     with open(symlink_seqs_output_csv, 'r') as f:
         reader = csv.DictReader(f)
         for row in reader:
-            print(row['R1'])
             miseq_match = re.search(miseq_regex, row['R1'])
             nextseq_match = re.search(nextseq_regex, row['R1'])
             run_id = None
@@ -56,10 +55,25 @@ def parse_symlink_seqs_output_csv(symlink_seqs_output_csv):
 
 def check_no_qc_failed_runs_are_symlinked(symlink_seqs_output, qc_status_by_run_id):
     """
+    Check that no QC failed runs are symlinked.
+
+    :param symlink_seqs_output: Symlink-seqs output
+    :type symlink_seqs_output: list[dict[str, str]]
+    :param qc_status_by_run_id: QC status by run ID
+    :type qc_status_by_run_id: dict[str, str]
+    :return: Whether or not no QC failed runs are symlinked (True if no QC failed runs are symlinked, False otherwise)
+    :rtype: bool
     """
+    qc_statuses = []
     for library in symlink_seqs_output:
-        run_id = symlink_seqs_output['RUN_ID']
-        symlink_seqs_output[library]['QC_STATUS'] = qc_status_by_run_id[run_id]
+        run_id = library['RUN_ID']
+        qc_status = qc_status_by_run_id[run_id]
+        qc_statuses.append(qc_status)
+
+    all_qc_statuses_passed = all([qc_status == 'PASS' for qc_status in qc_statuses])
+
+    return all_qc_statuses_passed
+    
 
 def main(args):
     qc_status_by_run_id = collect_qc_status_by_run_id(args.simulated_runs_dir)
