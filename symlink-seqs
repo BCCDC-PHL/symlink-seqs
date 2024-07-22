@@ -17,6 +17,43 @@ def jdump(x):
     print(json.dumps(x, indent=2))
 
 
+def parse_excluded_runs_file(excluded_runs_file):
+    """
+    Parse the excluded runs file, return as a set.
+
+    :param excluded_runs_file:
+    :type excluded_runs_file: str
+    :return: excluded_runs
+    :rtype: set[str]
+    """
+    excluded_runs = set()
+    with open(excluded_runs_file, 'r') as f:
+        for line in f:
+            excluded_runs.add(line.strip())
+
+    return excluded_runs
+
+
+def parse_excluded_libraries_file(excluded_libs_file):
+    """
+    Parse the excluded libraries file, return as a dict, indexed by sequencing run ID.
+
+    :param excluded_libs_file:
+    :type excluded_libs_file: str
+    :return: excluded_libraries_by_run
+    :rtype: dict[str, set[str]]
+    """
+    excluded_libraries_by_run = {}
+    with open(excluded_libs_file, 'r') as f:
+        for line in f:
+            sequencing_run_id, library_id = line.strip().split(',')
+            if sequencing_run_id not in excluded_libraries_by_run:
+                excluded_libraries_by_run[sequencing_run_id] = set()
+            excluded_libraries_by_run[sequencing_run_id].add(library_id)
+
+    return excluded_libraries_by_run
+
+
 def parse_config(config_path):
     """
     Parse json-format config file, return as a dict.
@@ -35,6 +72,16 @@ def parse_config(config_path):
                 print("ERROR: Error parsing config file: " + config_path, file=sys.stderr)
                 print(e, file=sys.stderr)
                 exit(-1)
+        if 'excluded_runs_list' in config:
+            config['excluded_runs'] = parse_excluded_runs_file(config['excluded_runs_list'])
+        else:
+            config['excluded_runs'] = set()
+
+        if 'excluded_libraries_list' in config:
+            config['excluded_libraries_by_sequencing_run_id'] = parse_excluded_libraries_file(config['excluded_libraries_list'])
+        else:
+            config['excluded_libraries_by_sequencing_run_id'] = {}
+            
     else:
         print("ERROR: config file does not exist: " + config_path, file=sys.stderr)
         exit(-1)
