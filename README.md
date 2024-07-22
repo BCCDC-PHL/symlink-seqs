@@ -61,6 +61,12 @@ The file should be a simple list of sequencing run IDs with no header:
 220521_M00456_0132_000000000-AB5RA
 ```
 
+A single run may be excluded using the `--exclude-run` flag, with the sequencing run ID provided as a command-line argument:
+
+```
+symlink-seqs --ids-file sample_ids.csv --exclude-run "220318_M00123_0128_000000000-AGTBE" --outdir symlinks
+```
+
 The `--excluded-libraries-file` flag can be used to provide a list of specific libraries to be skipped. The file should be a two-column, comma-separated file with no header,
 with a sequencing run ID in the first column and a library ID in the second column:
 
