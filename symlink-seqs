@@ -676,6 +676,6 @@ if __name__ == '__main__':
     parser.add_argument('--copy', action='store_true', help="Create copies instead of symlinks.")
     parser.add_argument('--csv', action='store_true', help="Print csv-format summary of fastq file paths for each sample to stdout.")
     parser.add_argument('--skip-qc-status-check', action='store_true', help="Skip checking qc status for runs.")
-    parser.add_argument('-o', '--outdir', default='.', help="Output directory, where symlinks (or copies) will be created.")
+    parser.add_argument('-o', '--outdir', required=True, help="Output directory, where symlinks (or copies) will be created.")
     args = parser.parse_args()
     main(args)
