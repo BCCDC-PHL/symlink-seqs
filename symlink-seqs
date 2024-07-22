@@ -72,12 +72,12 @@ def parse_config(config_path):
                 print("ERROR: Error parsing config file: " + config_path, file=sys.stderr)
                 print(e, file=sys.stderr)
                 exit(-1)
-        if 'excluded_runs_list' in config:
+        if 'excluded_runs_file' in config:
             config['excluded_runs'] = parse_excluded_runs_file(config['excluded_runs_list'])
         else:
             config['excluded_runs'] = set()
 
-        if 'excluded_libraries_list' in config:
+        if 'excluded_libraries_file' in config:
             config['excluded_libraries_by_sequencing_run_id'] = parse_excluded_libraries_file(config['excluded_libraries_list'])
         else:
             config['excluded_libraries_by_sequencing_run_id'] = {}
