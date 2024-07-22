@@ -753,6 +753,6 @@ if __name__ == '__main__':
     parser.add_argument('--exclude-run', help="A single run ID to exclude.")
     parser.add_argument('--excluded-runs-file', help="File containing list of run IDs to exclude. (single column, one run ID per line, no header)")
     parser.add_argument('--excluded-libraries-file', help="File containing list of run ID, library ID pairs to exclude. (csv format, no header)")
-    parser.add_argument('-o', '--outdir', default='.', help="Output directory, where symlinks (or copies) will be created.")
+    parser.add_argument('-o', '--outdir', required=True, help="Output directory, where symlinks (or copies) will be created.")
     args = parser.parse_args()
     main(args)
