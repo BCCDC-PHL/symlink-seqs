@@ -117,6 +117,20 @@ def merge_config_with_args(config, args):
     if 'skip_qc_status_check' not in config:
         config['skip_qc_status_check'] = args.skip_qc_status_check
 
+    if args.excluded_run is not None:
+        config['excluded_runs'].add(args.excluded_run)
+
+    if args.excluded_runs_file is not None:
+        excluded_runs_from_args = parse_excluded_runs_file(args.excluded_runs_file)
+        config['excluded_runs'] = config['excluded_runs'].union(excluded_runs_from_args)
+
+    if args.excluded_libraries_file is not None:
+        excluded_libraries_from_args = parse_excluded_libraries_file(args.excluded_libraries_file)
+        for run_id, libraries in excluded_libraries_from_args.items():
+            if run_id not in config['excluded_libraries_by_sequencing_run_id']:
+                config['excluded_libraries_by_sequencing_run_id'][run_id] = set()
+            config['excluded_libraries_by_sequencing_run_id'][run_id] = config['excluded_libraries_by_sequencing_run_id'][run_id].union(libraries)
+
     return config
 
 
@@ -692,13 +706,26 @@ def main(args):
             run_dirs = list(filter(lambda x: os.path.basename(x) == args.run_id, run_dirs))
 
         for run_dir in run_dirs:
+            sequencing_run_id = os.path.basename(run_dir.rstrip('/'))
+            if sequencing_run_id in config['excluded_runs']:
+                print(f"INFO: Skipping run {sequencing_run_id} due to exclusion: {run_dir}", file=sys.stderr)
+                continue
             if not config['skip_qc_status_check']:
                 qc_status = check_qc_status(run_dir)
                 if qc_status != None and qc_status != 'PASS':
                     print("WARNING: Skipping run due to failed QC: " + run_dir, file=sys.stderr)
                     continue
 
-            fastq_paths = get_fastq_paths(config, run_dir, sample_ids, args.project_id)
+            included_sample_ids = []
+            if sequencing_run_id in config['excluded_libraries_by_sequencing_run_id']:
+                excluded_sample_ids = config['excluded_libraries_by_sequencing_run_id'][sequencing_run_id]
+                for sample_id in sample_ids:
+                    if sample_id not in excluded_sample_ids:
+                        included_sample_ids.append(sample_id)
+            else:
+                included_sample_ids = sample_ids
+
+            fastq_paths = get_fastq_paths(config, run_dir, included_sample_ids, args.project_id)
 
             if config['copy']:
                 create_copies(fastq_paths)
@@ -723,6 +750,9 @@ if __name__ == '__main__':
     parser.add_argument('--copy', action='store_true', help="Create copies instead of symlinks.")
     parser.add_argument('--csv', action='store_true', help="Print csv-format summary of fastq file paths for each sample to stdout.")
     parser.add_argument('--skip-qc-status-check', action='store_true', help="Skip checking qc status for runs.")
+    parser.add_argument('--exclude-run', help="A single run ID to exclude.")
+    parser.add_argument('--excluded-runs-file', help="File containing list of run IDs to exclude. (single column, one run ID per line, no header)")
+    parser.add_argument('--excluded-libraries-file', help="File containing list of run ID, library ID pairs to exclude. (csv format, no header)")
     parser.add_argument('-o', '--outdir', default='.', help="Output directory, where symlinks (or copies) will be created.")
     args = parser.parse_args()
     main(args)
