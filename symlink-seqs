@@ -72,13 +72,13 @@ def parse_config(config_path):
                 print("ERROR: Error parsing config file: " + config_path, file=sys.stderr)
                 print(e, file=sys.stderr)
                 exit(-1)
-        if 'excluded_runs_file' in config:
-            config['excluded_runs'] = parse_excluded_runs_file(config['excluded_runs_list'])
+        if 'excluded_runs_file' in config and os.path.exists(config['excluded_runs_file']):
+            config['excluded_runs'] = parse_excluded_runs_file(config['excluded_runs_file'])
         else:
             config['excluded_runs'] = set()
 
-        if 'excluded_libraries_file' in config:
-            config['excluded_libraries_by_sequencing_run_id'] = parse_excluded_libraries_file(config['excluded_libraries_list'])
+        if 'excluded_libraries_file' in config and os.path.exists(config['excluded_libraries_file']):
+            config['excluded_libraries_by_sequencing_run_id'] = parse_excluded_libraries_file(config['excluded_libraries_file'])
         else:
             config['excluded_libraries_by_sequencing_run_id'] = {}
             
@@ -117,8 +117,8 @@ def merge_config_with_args(config, args):
     if 'skip_qc_status_check' not in config:
         config['skip_qc_status_check'] = args.skip_qc_status_check
 
-    if args.excluded_run is not None:
-        config['excluded_runs'].add(args.excluded_run)
+    if args.exclude_run is not None:
+        config['excluded_runs'].add(args.exclude_run)
 
     if args.excluded_runs_file is not None:
         excluded_runs_from_args = parse_excluded_runs_file(args.excluded_runs_file)
