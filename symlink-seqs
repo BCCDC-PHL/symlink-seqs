@@ -17,6 +17,43 @@ def jdump(x):
     print(json.dumps(x, indent=2))
 
 
+def parse_excluded_runs_file(excluded_runs_file):
+    """
+    Parse the excluded runs file, return as a set.
+
+    :param excluded_runs_file:
+    :type excluded_runs_file: str
+    :return: excluded_runs
+    :rtype: set[str]
+    """
+    excluded_runs = set()
+    with open(excluded_runs_file, 'r') as f:
+        for line in f:
+            excluded_runs.add(line.strip())
+
+    return excluded_runs
+
+
+def parse_excluded_libraries_file(excluded_libs_file):
+    """
+    Parse the excluded libraries file, return as a dict, indexed by sequencing run ID.
+
+    :param excluded_libs_file:
+    :type excluded_libs_file: str
+    :return: excluded_libraries_by_run
+    :rtype: dict[str, set[str]]
+    """
+    excluded_libraries_by_run = {}
+    with open(excluded_libs_file, 'r') as f:
+        for line in f:
+            sequencing_run_id, library_id = line.strip().split(',')
+            if sequencing_run_id not in excluded_libraries_by_run:
+                excluded_libraries_by_run[sequencing_run_id] = set()
+            excluded_libraries_by_run[sequencing_run_id].add(library_id)
+
+    return excluded_libraries_by_run
+
+
 def parse_config(config_path):
     """
     Parse json-format config file, return as a dict.
@@ -35,6 +72,16 @@ def parse_config(config_path):
                 print("ERROR: Error parsing config file: " + config_path, file=sys.stderr)
                 print(e, file=sys.stderr)
                 exit(-1)
+        if 'excluded_runs_file' in config and os.path.exists(config['excluded_runs_file']):
+            config['excluded_runs'] = parse_excluded_runs_file(config['excluded_runs_file'])
+        else:
+            config['excluded_runs'] = set()
+
+        if 'excluded_libraries_file' in config and os.path.exists(config['excluded_libraries_file']):
+            config['excluded_libraries_by_sequencing_run_id'] = parse_excluded_libraries_file(config['excluded_libraries_file'])
+        else:
+            config['excluded_libraries_by_sequencing_run_id'] = {}
+            
     else:
         print("ERROR: config file does not exist: " + config_path, file=sys.stderr)
         exit(-1)
@@ -69,6 +116,20 @@ def merge_config_with_args(config, args):
         config['project_id'] = args.project_id
     if 'skip_qc_status_check' not in config:
         config['skip_qc_status_check'] = args.skip_qc_status_check
+
+    if args.exclude_run is not None:
+        config['excluded_runs'].add(args.exclude_run)
+
+    if args.excluded_runs_file is not None:
+        excluded_runs_from_args = parse_excluded_runs_file(args.excluded_runs_file)
+        config['excluded_runs'] = config['excluded_runs'].union(excluded_runs_from_args)
+
+    if args.excluded_libraries_file is not None:
+        excluded_libraries_from_args = parse_excluded_libraries_file(args.excluded_libraries_file)
+        for run_id, libraries in excluded_libraries_from_args.items():
+            if run_id not in config['excluded_libraries_by_sequencing_run_id']:
+                config['excluded_libraries_by_sequencing_run_id'][run_id] = set()
+            config['excluded_libraries_by_sequencing_run_id'][run_id] = config['excluded_libraries_by_sequencing_run_id'][run_id].union(libraries)
 
     return config
 
@@ -645,13 +706,26 @@ def main(args):
             run_dirs = list(filter(lambda x: os.path.basename(x) == args.run_id, run_dirs))
 
         for run_dir in run_dirs:
+            sequencing_run_id = os.path.basename(run_dir.rstrip('/'))
+            if sequencing_run_id in config['excluded_runs']:
+                print(f"INFO: Skipping run {sequencing_run_id} due to exclusion: {run_dir}", file=sys.stderr)
+                continue
             if not config['skip_qc_status_check']:
                 qc_status = check_qc_status(run_dir)
                 if qc_status != None and qc_status != 'PASS':
                     print("WARNING: Skipping run due to failed QC: " + run_dir, file=sys.stderr)
                     continue
 
-            fastq_paths = get_fastq_paths(config, run_dir, sample_ids, args.project_id)
+            included_sample_ids = []
+            if sequencing_run_id in config['excluded_libraries_by_sequencing_run_id']:
+                excluded_sample_ids = config['excluded_libraries_by_sequencing_run_id'][sequencing_run_id]
+                for sample_id in sample_ids:
+                    if sample_id not in excluded_sample_ids:
+                        included_sample_ids.append(sample_id)
+            else:
+                included_sample_ids = sample_ids
+
+            fastq_paths = get_fastq_paths(config, run_dir, included_sample_ids, args.project_id)
 
             if config['copy']:
                 create_copies(fastq_paths)
@@ -676,6 +750,9 @@ if __name__ == '__main__':
     parser.add_argument('--copy', action='store_true', help="Create copies instead of symlinks.")
     parser.add_argument('--csv', action='store_true', help="Print csv-format summary of fastq file paths for each sample to stdout.")
     parser.add_argument('--skip-qc-status-check', action='store_true', help="Skip checking qc status for runs.")
+    parser.add_argument('--exclude-run', help="A single run ID to exclude.")
+    parser.add_argument('--excluded-runs-file', help="File containing list of run IDs to exclude. (single column, one run ID per line, no header)")
+    parser.add_argument('--excluded-libraries-file', help="File containing list of run ID, library ID pairs to exclude. (csv format, no header)")
     parser.add_argument('-o', '--outdir', required=True, help="Output directory, where symlinks (or copies) will be created.")
     args = parser.parse_args()
     main(args)
