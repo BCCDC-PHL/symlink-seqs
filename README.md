@@ -30,6 +30,7 @@ optional arguments:
                         File containing list of run IDs to exclude. (single column, one run ID per line, no header)
   --excluded-libraries-file EXCLUDED_LIBRARIES_FILE
                         File containing list of run ID, library ID pairs to exclude. (csv format, no header)
+  --verbose             Print verbose output, including cases where run QC check output cannont be found.
   -o OUTDIR, --outdir OUTDIR
                         Output directory, where symlinks (or copies) will be created.
 ```
@@ -104,6 +105,7 @@ Additional settings may be added to the config:
 	],
 	"simplify_sample_id": true,
 	"skip_qc_status_check": true,
+	"verbose": true,
 	"excluded_runs_file": "/path/to/excluded_runs.csv",
 	"excluded_libraries_file": "/path/to/excluded_libraries.csv"
 }
@@ -116,6 +118,7 @@ Additional settings may be added to the config:
 | `copy`                       | False     | Boolean       | When set to `true`, make copies instead of symlinks               |
 | `csv`                        | False     | Boolean       | When set to `true`, print a csv summary of fastq files per sample |
 | `skip_qc_status_check`       | False     | Boolean       | When set to `true`, the QC status of runs will not be checked     |
+| `verbose`                    | False     | Boolean       | When set to `true`, verbose output about the scanning process will be printed to stderr |
 | `outdir`                     | False     | Path          | Directory to create symlinks or copies under                      |
 | `excluded_runs_file`         | False     | Path          | Path to file containing a list of sequencing run IDs to be excluded when searching for fastq files (single column, no header) |
 | `excluded_libraries_file`    | True      | Path          | Path to file containing list of (sequencing run ID, library ID) pairs to be excluded when searching for fastq files (two columns, comma-separated) |
