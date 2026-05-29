@@ -9,6 +9,7 @@ import shutil
 import sys
 import re
 
+VERSION = "0.1.1"
 
 def jdump(x):
     """
@@ -683,6 +684,9 @@ def check_qc_status(run_dir, verbose=False):
 
 
 def main(args):
+    if args.version:
+        print(f"symlink-seqs v{VERSION}")
+        exit(0)
 
     config = {}
     config = parse_config(args.config)
@@ -761,6 +765,7 @@ if __name__ == '__main__':
     parser.add_argument('--excluded-runs-file', help="File containing list of run IDs to exclude. (single column, one run ID per line, no header)")
     parser.add_argument('--excluded-libraries-file', help="File containing list of run ID, library ID pairs to exclude. (csv format, no header)")
     parser.add_argument('--verbose', action='store_true', help="Print verbose output, including cases where run QC check output cannont be found.")
+    parser.add_argument('-v', '--version', action='store_true', help="Print version and exit.")
     parser.add_argument('-o', '--outdir', help="Output directory, where symlinks (or copies) will be created.")
     args = parser.parse_args()
     main(args)
