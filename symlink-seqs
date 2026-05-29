@@ -502,7 +502,7 @@ def simplify_fastq_filename(sample_id, original_filename):
     return dest_filename
 
 
-def get_fastq_paths(config, run_dir, sample_ids, project_id):
+def get_fastq_paths(config, run_dir, sample_ids, project_id, verbose=False):
     """
     Get paths to source and destination of fastq files.
 
@@ -548,7 +548,8 @@ def get_fastq_paths(config, run_dir, sample_ids, project_id):
                 samplesheet_path = samplesheet_paths[0] # If multiple samplesheets exist, how do we choose the correct one?
                 all_samples = parse_samplesheet_nextseq(samplesheet_path)
             else:
-                print("WARNING: Failed to find SampleSheet in: " + run_dir, file=sys.stderr)
+                if verbose:
+                    print("WARNING: Failed to find SampleSheet in: " + run_dir, file=sys.stderr)
                 all_samples = []
             candidate_samples = list(filter(has_necessary_fields_for_symlinking_nextseq, all_samples))
             # Occasionally sample IDs in the SampleSheet will include underscore characters, which are
@@ -571,7 +572,8 @@ def get_fastq_paths(config, run_dir, sample_ids, project_id):
             samplesheet_path = samplesheet_paths[0]
             all_samples = parse_samplesheet_gridion_custom(samplesheet_path)
         else:
-            print("WARNING: Failed to find SampleSheet in: " + run_dir, file=sys.stderr)
+            if verbose:
+                print("WARNING: Failed to find SampleSheet in: " + run_dir, file=sys.stderr)
             all_samples = []
         candidate_samples = filter(has_necessary_fields_for_symlinking_gridion, all_samples)
         if sample_ids is not None:
@@ -658,7 +660,7 @@ def pair_fastq_paths(fastq_paths):
     return paired_fastq_paths
 
 
-def check_qc_status(run_dir):
+def check_qc_status(run_dir, verbose=False):
     """
     Check the status of the QC check for a run.
 
@@ -674,7 +676,8 @@ def check_qc_status(run_dir):
             qc_check = json.load(f)
             qc_status = qc_check['overall_pass_fail']
     else:
-        print("WARNING: QC check file not found in: " + run_dir, file=sys.stderr)
+        if verbose:
+            print("WARNING: QC check file not found in: " + run_dir, file=sys.stderr)
 
     return qc_status
 
@@ -684,8 +687,9 @@ def main(args):
     config = {}
     config = parse_config(args.config)
     config = merge_config_with_args(config, args)
+    verbose = config.get('verbose', False)
 
-    sample_ids = None
+    sample_ids = []
     if args.ids_file is not None:
         sample_ids = parse_ids_file(args.ids_file)
 
@@ -707,12 +711,12 @@ def main(args):
 
         for run_dir in run_dirs:
             sequencing_run_id = os.path.basename(run_dir.rstrip('/'))
-            if sequencing_run_id in config['excluded_runs']:
+            if sequencing_run_id in config['excluded_runs'] and verbose:
                 print(f"INFO: Skipping run {sequencing_run_id} due to exclusion: {run_dir}", file=sys.stderr)
                 continue
             if not config['skip_qc_status_check']:
-                qc_status = check_qc_status(run_dir)
-                if qc_status != None and qc_status != 'PASS':
+                qc_status = check_qc_status(run_dir, verbose)
+                if qc_status != None and qc_status != 'PASS' and verbose:
                     print("WARNING: Skipping run due to failed QC: " + run_dir, file=sys.stderr)
                     continue
 
@@ -725,7 +729,7 @@ def main(args):
             else:
                 included_sample_ids = sample_ids
 
-            fastq_paths = get_fastq_paths(config, run_dir, included_sample_ids, args.project_id)
+            fastq_paths = get_fastq_paths(config, run_dir, included_sample_ids, args.project_id, args.verbose)
 
             if config['copy']:
                 create_copies(fastq_paths)
@@ -753,6 +757,7 @@ if __name__ == '__main__':
     parser.add_argument('--exclude-run', help="A single run ID to exclude.")
     parser.add_argument('--excluded-runs-file', help="File containing list of run IDs to exclude. (single column, one run ID per line, no header)")
     parser.add_argument('--excluded-libraries-file', help="File containing list of run ID, library ID pairs to exclude. (csv format, no header)")
+    parser.add_argument('--verbose', action='store_true', help="Print verbose output, including cases where run QC check output cannont be found.")
     parser.add_argument('-o', '--outdir', required=True, help="Output directory, where symlinks (or copies) will be created.")
     args = parser.parse_args()
     main(args)
