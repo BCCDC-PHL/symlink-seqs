@@ -159,9 +159,9 @@ def determine_sequencer_type(run_id):
     :return: sequencer type
     :rtype: str
     """
-    miseq_regex = '\d{6}_M\d{5}_\d{4}_\d{9}-[A-Z0-9]{5}'
-    nextseq_regex = '\d{6}_VH\d{5}_\d+_[A-Z0-9]{9}'
-    gridion_regex = '\d{8}_\d{4}_X\d_[A-Z]{3}\d+_[a-z0-9]{8}'
+    miseq_regex = '\\d{6}_M\\d{5}_\\d{4}_\\d{9}-[A-Z0-9]{5}'
+    nextseq_regex = '\\d{6}_VH\\d{5}_\\d+_[A-Z0-9]{9}'
+    gridion_regex = '\\d{8}_\\d{4}_X\\d_[A-Z]{3}\\d+_[a-z0-9]{8}'
 
     sequencer_type = None
     if re.match(miseq_regex, run_id):
