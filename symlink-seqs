@@ -688,6 +688,9 @@ def main(args):
     config = parse_config(args.config)
     config = merge_config_with_args(config, args)
     verbose = config.get('verbose', False)
+    if not config.get('csv', False) and not config.get('outdir', None):
+        print('ERROR: Please provide -o or --outdir when creating symlinks')
+        exit(-1)
 
     sample_ids = []
     if args.ids_file is not None:
@@ -731,9 +734,9 @@ def main(args):
 
             fastq_paths = get_fastq_paths(config, run_dir, included_sample_ids, args.project_id, args.verbose)
 
-            if config['copy']:
+            if config.get('copy', False):
                 create_copies(fastq_paths)
-            elif config['csv']:
+            elif config.get('csv', False):
                 paired_fastq_paths = pair_fastq_paths(fastq_paths)
                 if len(paired_fastq_paths) > 0:
                     output_fieldnames = ['ID', 'R1', 'R2']
@@ -758,6 +761,6 @@ if __name__ == '__main__':
     parser.add_argument('--excluded-runs-file', help="File containing list of run IDs to exclude. (single column, one run ID per line, no header)")
     parser.add_argument('--excluded-libraries-file', help="File containing list of run ID, library ID pairs to exclude. (csv format, no header)")
     parser.add_argument('--verbose', action='store_true', help="Print verbose output, including cases where run QC check output cannont be found.")
-    parser.add_argument('-o', '--outdir', required=True, help="Output directory, where symlinks (or copies) will be created.")
+    parser.add_argument('-o', '--outdir', help="Output directory, where symlinks (or copies) will be created.")
     args = parser.parse_args()
     main(args)
