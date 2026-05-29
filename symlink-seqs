@@ -9,6 +9,7 @@ import shutil
 import sys
 import re
 
+VERSION = "0.1.1"
 
 def jdump(x):
     """
@@ -158,9 +159,9 @@ def determine_sequencer_type(run_id):
     :return: sequencer type
     :rtype: str
     """
-    miseq_regex = '\d{6}_M\d{5}_\d{4}_\d{9}-[A-Z0-9]{5}'
-    nextseq_regex = '\d{6}_VH\d{5}_\d+_[A-Z0-9]{9}'
-    gridion_regex = '\d{8}_\d{4}_X\d_[A-Z]{3}\d+_[a-z0-9]{8}'
+    miseq_regex = '\\d{6}_M\\d{5}_\\d{4}_\\d{9}-[A-Z0-9]{5}'
+    nextseq_regex = '\\d{6}_VH\\d{5}_\\d+_[A-Z0-9]{9}'
+    gridion_regex = '\\d{8}_\\d{4}_X\\d_[A-Z]{3}\\d+_[a-z0-9]{8}'
 
     sequencer_type = None
     if re.match(miseq_regex, run_id):
@@ -683,11 +684,17 @@ def check_qc_status(run_dir, verbose=False):
 
 
 def main(args):
+    if args.version:
+        print(f"symlink-seqs v{VERSION}")
+        exit(0)
 
     config = {}
     config = parse_config(args.config)
     config = merge_config_with_args(config, args)
     verbose = config.get('verbose', False)
+    if not config.get('csv', False) and not config.get('outdir', None):
+        print('ERROR: Please provide -o or --outdir when creating symlinks')
+        exit(-1)
 
     sample_ids = []
     if args.ids_file is not None:
@@ -731,9 +738,9 @@ def main(args):
 
             fastq_paths = get_fastq_paths(config, run_dir, included_sample_ids, args.project_id, args.verbose)
 
-            if config['copy']:
+            if config.get('copy', False):
                 create_copies(fastq_paths)
-            elif config['csv']:
+            elif config.get('csv', False):
                 paired_fastq_paths = pair_fastq_paths(fastq_paths)
                 if len(paired_fastq_paths) > 0:
                     output_fieldnames = ['ID', 'R1', 'R2']
@@ -758,6 +765,7 @@ if __name__ == '__main__':
     parser.add_argument('--excluded-runs-file', help="File containing list of run IDs to exclude. (single column, one run ID per line, no header)")
     parser.add_argument('--excluded-libraries-file', help="File containing list of run ID, library ID pairs to exclude. (csv format, no header)")
     parser.add_argument('--verbose', action='store_true', help="Print verbose output, including cases where run QC check output cannont be found.")
-    parser.add_argument('-o', '--outdir', required=True, help="Output directory, where symlinks (or copies) will be created.")
+    parser.add_argument('-v', '--version', action='store_true', help="Print version and exit.")
+    parser.add_argument('-o', '--outdir', help="Output directory, where symlinks (or copies) will be created.")
     args = parser.parse_args()
     main(args)
