@@ -1,0 +1,26 @@
+[Header]
+Local Run Manager Analysis Id,66012
+Experiment Name,Experiment 1
+Date,2025-12-05
+Module,GenerateFASTQ - 3.0.1
+Workflow,GenerateFASTQ
+Library Prep Kit,Custom
+Index Kit,Custom
+Chemistry,Amplicon
+
+[Reads]
+251
+251
+
+[Settings]
+
+[Data]
+Sample_ID,Sample_Name,Description,I7_Index_ID,index,I5_Index_ID,index2,Sample_Project
+control,control,,GTTGACCT,GTTGACCT,AAGCACTG,AAGCACTG,
+SAM001-1_research,SAM001-1_research,,CGTGTGTA,CGTGTGTA,TTCGTTGG,TTCGTTGG,
+SAM001-2_research,SAM001-2_research,,ACGACTTG,ACGACTTG,TCGCTGTT,TCGCTGTT,
+SAM001-3_research,SAM001-3_research,,CACTAGCT,CACTAGCT,GAATCCGA,GAATCCGA,
+SAM002-1_research,SAM002-1_research,,ACTAGGAG,ACTAGGAG,GTGCCATA,GTGCCATA,
+SAM002-2_research,SAM002-2_research,,GTAGGAGT,GTAGGAGT,CTTAGGAC,CTTAGGAC,
+SAM002-3_research,SAM002-3_research,,CCTGATTG,CCTGATTG,AACTGAGC,AACTGAGC,
+NTC,NTC,,ATATGCGC,ATATGCGC,CTGATCGT,CTGATCGT,
