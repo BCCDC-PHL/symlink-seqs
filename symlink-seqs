@@ -117,6 +117,8 @@ def merge_config_with_args(config, args):
         config['project_id'] = args.project_id
     if 'skip_qc_status_check' not in config:
         config['skip_qc_status_check'] = args.skip_qc_status_check
+    if 'verbose' not in config:
+        config['verbose'] = args.verbose
 
     if args.exclude_run is not None:
         config['excluded_runs'].add(args.exclude_run)
@@ -421,21 +423,19 @@ def get_latest_analysis_subdir(run_dir):
     return latest_analysis_subdir
 
 
-def create_symlinks(src_dest_paths):
+def create_symlinks(src_dest_paths, outdir):
     """
     Symlink src to dest for each element in src_dest_paths
 
-    :param src_dest_paths: list of dicts with keys "src" and "dest"
+    :param src_dest_paths: list of dicts with keys "src" and "dest_filename"
     :type src_dest_paths: list[dict[str, str]]
     :return: None
     :rtype: NoneType
     """
     for paths in src_dest_paths:
-        outdir = os.path.dirname(paths['dest'])
-        if not os.path.exists(outdir):
-            os.makedirs(outdir)
+        dest_path = os.path.join(outdir, paths['dest_filename'])
         try:
-            os.symlink(paths['src'], paths['dest'])
+            os.symlink(paths['src'], dest_path)
         except OSError as e:
             if e.errno == 17:
                 pass
@@ -443,20 +443,18 @@ def create_symlinks(src_dest_paths):
                 print(str(e) + ". files: " + paths['src'] + ", " + paths['dest'], file=sys.stderr)
 
 
-def create_copies(src_dest_paths):
+def create_copies(src_dest_paths, outdir):
     """
     Copy src to dest for each element in src_dest_paths
 
-    :param src_dest_paths: list of dicts with keys "src" and "dest"
+    :param src_dest_paths: list of dicts with keys "src" and "dest_filename"
     :type src_dest_paths: list[dict[str, str]]
     :return: None
     :rtype: NoneType
     """
     for paths in src_dest_paths:
-        outdir = os.path.dirname(paths['dest'])
-        if not os.path.exists(outdir):
-            os.makedirs(outdir)
-        shutil.copy(paths['src'], paths['dest'])
+        dest_path = os.path.join(outdir, paths['dest_filename'])
+        shutil.copy(paths['src'], dest_path)
 
 
 def parse_ids_file(ids_file_path):
@@ -513,7 +511,7 @@ def get_fastq_paths(config, run_dir, sample_ids, project_id, verbose=False):
     :type run_dir: str
     :param sample_ids:
     :type sample_ids: Iterable|NoneType
-    :return: List of dicts with the keys: src, dest, sample_id
+    :return: List of dicts with the keys: src, dest_filename, sample_id
     :rtype: list[dict[str, str]]
     """
 
@@ -523,9 +521,28 @@ def get_fastq_paths(config, run_dir, sample_ids, project_id, verbose=False):
     fastq_subdir = None
     fastq_paths = []
 
+    fixed_sample_ids = []
+    for sample_id in sample_ids:
+        fixed_sample_ids.append(sample_id.replace('_', '-'))
+
     if sequencer_type == 'miseq':
+        miseq_dir_type = determine_miseq_directory_structure(run_dir)
         fastq_subdir = find_miseq_fastq_subdir(run_dir)
-        samplesheet_path = os.path.join(run_dir, 'SampleSheet.csv')
+
+        samplesheet_path = None
+        if miseq_dir_type == 'old':
+            samplesheet_glob = os.path.join(run_dir, 'SampleSheet*.csv')
+            samplesheet_paths = glob.glob(samplesheet_glob)
+            if len(samplesheet_paths) > 0:
+                samplesheet_path = samplesheet_paths[0]
+            
+        elif miseq_dir_type == 'new':
+            timestamped_fastq_parent_dir = os.path.dirname(os.path.join(run_dir, fastq_subdir))
+            samplesheet_path = os.path.join(timestamped_fastq_parent_dir, 'SampleSheetUsed.csv')
+
+        if not samplesheet_path and verbose:
+            print(f"ERROR: Failed to find SampleSheet for run {run_id}", file=sys.stderr)
+            
         all_samples = parse_samplesheet_miseq(samplesheet_path)
         candidate_samples = list(filter(has_necessary_fields_for_symlinking_miseq, all_samples))
         # Occasionally sample IDs in the SampleSheet will include underscore characters, which are
@@ -534,9 +551,9 @@ def get_fastq_paths(config, run_dir, sample_ids, project_id, verbose=False):
             sample['sample_id'] = sample['sample_id'].replace('_', '-')
             sample['sample_name'] = sample['sample_name'].replace('_', '-')
         if sample_ids is not None:
-            selected_samples = filter(lambda x: x['sample_id'] in sample_ids or x['sample_name'] in sample_ids, candidate_samples)
+            selected_samples = list(filter(lambda x: x['sample_id'] in fixed_sample_ids or x['sample_name'] in fixed_sample_ids, candidate_samples))
         elif project_id is not None:
-            selected_samples = filter(lambda x: x['sample_project'] == project_id, candidate_samples)
+            selected_samples = list(filter(lambda x: x['sample_project'] == project_id, candidate_samples))
         else:
             selected_samples = candidate_samples
         
@@ -558,7 +575,7 @@ def get_fastq_paths(config, run_dir, sample_ids, project_id, verbose=False):
             for sample in candidate_samples:
                 sample['sample_id'] = sample['sample_id'].replace('_', '-')
             if sample_ids is not None:
-                selected_samples = filter(lambda x: x['sample_id'] in sample_ids, candidate_samples)
+                selected_samples = filter(lambda x: x['sample_id'] in fixed_sample_ids, candidate_samples)
             elif project_id is not None:
                 selected_samples = filter(lambda x: x['project_name'] == project_id, candidate_samples)
             else:
@@ -583,7 +600,6 @@ def get_fastq_paths(config, run_dir, sample_ids, project_id, verbose=False):
             selected_samples = filter(lambda x: x['project_name'] == project_id, candidate_samples)
         else:
             selected_samples = candidate_samples
-
 
     # Skip run if fastq_subdir cannot be determined
     if fastq_subdir is None:
@@ -612,9 +628,7 @@ def get_fastq_paths(config, run_dir, sample_ids, project_id, verbose=False):
                 if config['simplify_sample_id']:
                     dest_filename = simplify_fastq_filename(sample_id, dest_filename)
 
-                dest = os.path.join(config['outdir'], dest_filename)
-
-                fastq_paths.append({"src": src, "dest": dest, "sample_id": sample_id})
+                fastq_paths.append({"src": src, "dest_filename": dest_filename, "sample_id": sample_id})
 
     return fastq_paths
 
@@ -696,13 +710,16 @@ def main(args):
         print('ERROR: Please provide -o or --outdir when creating symlinks')
         exit(-1)
 
+    if args.outdir and not os.path.exists(args.outdir):
+        os.makedirs(args.outdir, exist_ok=True)
+
     sample_ids = []
     if args.ids_file is not None:
         sample_ids = parse_ids_file(args.ids_file)
 
     # In csv-mode, need to write the header once, before we start
     # looping over runs.
-    if config['csv']:
+    if config.get('csv', None):
         output_fieldnames = ['ID', 'R1', 'R2']
         writer = csv.DictWriter(sys.stdout, fieldnames=output_fieldnames)
         writer.writeheader()
@@ -721,10 +738,11 @@ def main(args):
             if sequencing_run_id in config['excluded_runs'] and verbose:
                 print(f"INFO: Skipping run {sequencing_run_id} due to exclusion: {run_dir}", file=sys.stderr)
                 continue
-            if not config['skip_qc_status_check']:
+            if not config.get('skip_qc_status_check', False):
                 qc_status = check_qc_status(run_dir, verbose)
-                if qc_status != None and qc_status != 'PASS' and verbose:
-                    print("WARNING: Skipping run due to failed QC: " + run_dir, file=sys.stderr)
+                if qc_status == None or qc_status != 'PASS':
+                    if verbose:
+                        print(f"WARNING: Skipping run due to failed QC: {run_dir}", file=sys.stderr)
                     continue
 
             included_sample_ids = []
@@ -739,7 +757,7 @@ def main(args):
             fastq_paths = get_fastq_paths(config, run_dir, included_sample_ids, args.project_id, args.verbose)
 
             if config.get('copy', False):
-                create_copies(fastq_paths)
+                create_copies(fastq_paths, args.outdir)
             elif config.get('csv', False):
                 paired_fastq_paths = pair_fastq_paths(fastq_paths)
                 if len(paired_fastq_paths) > 0:
@@ -748,7 +766,7 @@ def main(args):
                     for row in paired_fastq_paths:
                         writer.writerow(row)
             else:
-                create_symlinks(fastq_paths)
+                create_symlinks(fastq_paths, args.outdir)
 
 
 if __name__ == '__main__':

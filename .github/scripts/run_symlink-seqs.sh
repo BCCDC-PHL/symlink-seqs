@@ -3,8 +3,21 @@
 mkdir -p artifacts/symlink-seqs
 
 ./symlink-seqs \
-    --config .github/data/symlink-seqs/config.json \
+    --config .github/data/symlink-seqs/configs/simulated-runs-config.json \
     --project-id 'mysterious_experiment' \
     --csv \
-    -o artifacts/symlinks/mysterious_experiment \
     > artifacts/symlink-seqs/mysterious_experiment.csv
+
+
+./symlink-seqs \
+    --config .github/data/symlink-seqs/configs/test_run_dirs_config.json \
+    --ids-file .github/data/symlink-seqs/sample_id_lists/miseq_alignment_2_samples_with_underscores.csv \
+    --csv \
+    > artifacts/symlink-seqs/miseq_251202_M04446_0426_000000000-M7L2J_alignment_2_samples_with_underscores.csv
+
+./symlink-seqs\
+    --config .github/data/symlink-seqs/configs/test_run_dirs_config.json \
+    --run-id 240719_VH00278_220_AAFMTYGM5 \
+    --project-id 'project-2' \
+    --csv \
+    > artifacts/symlink-seqs/nextseq_240719_VH00278_220_AAFMTYGM5_alignment_1_project-2.csv

@@ -1,2 +1,5 @@
+*~
 test_*
 dev-config.json
+artifacts
+illumina-run-simulator.jar
