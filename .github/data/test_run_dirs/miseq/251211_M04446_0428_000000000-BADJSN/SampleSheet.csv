@@ -1,0 +1,15 @@
+[Header]
+Experiment Name,Bad JSON QC Test
+Date,2025-12-11
+Module,GenerateFASTQ - 3.0.1
+Workflow,GenerateFASTQ
+
+[Reads]
+251
+251
+
+[Settings]
+
+[Data]
+Sample_ID,Sample_Name,Description,I7_Index_ID,index,I5_Index_ID,index2,Sample_Project
+SAM001,SAM001,,GTTGACCT,GTTGACCT,AAGCACTG,AAGCACTG,project-1
