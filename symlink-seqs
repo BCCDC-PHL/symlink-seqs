@@ -302,26 +302,32 @@ def parse_samplesheet_nextseq(samplesheet_path):
     return cloud_data
 
 
-def parse_samplesheet_gridion_custom(samplesheet_path):
+def parse_samplesheet_gridion(samplesheet_path):
     """
-    Parse a custom GridION SampleSheet to get sample and project IDs.
-    Custom GridION SampleSheets are simple .csv files that must have the following three fields:
+    Parse an ONT GridION sample sheet, extracting sample_id and project_id from the alias field.
+    The alias field encodes both values as '{sample_id}_{project_id}'. Everything to the left
+    of the first underscore is the sample ID; everything to the right is the project ID.
 
-    sample_id
-    barcode
-    project_id
-
-    :param samplesheet_path:
+    :param samplesheet_path: Path to the sample sheet CSV
     :type samplesheet_path: str
-    :return: 
-    :rtype:
+    :return: List of sample dicts with 'sample_id', 'project_id', and 'barcode' keys
+    :rtype: list[dict]
     """
     samples = []
     with open(samplesheet_path, 'r') as f:
         reader = csv.DictReader(f)
         for row in reader:
-            samples.append(row)
-
+            alias = row.get('alias', '')
+            if not alias:
+                continue
+            parts = alias.split('_', 1)
+            sample_id = parts[0]
+            project_id = parts[1] if len(parts) > 1 else ''
+            samples.append({
+                'sample_id': sample_id,
+                'project_id': project_id,
+                'barcode': row.get('barcode', ''),
+            })
     return samples
 
 
@@ -361,7 +367,7 @@ def has_necessary_fields_for_symlinking(sample, sequencer_type):
     elif sequencer_type == 'nextseq':
         return bool(sample.get('sample_id')) and 'project_name' in sample
     elif sequencer_type == 'gridion':
-        return bool(sample.get('sample_id')) and 'project_id' in sample
+        return bool(sample.get('sample_id'))
     return False
 
 
@@ -582,13 +588,13 @@ def select_gridion_samples(run_dir, normalized_sample_ids, project_id, verbose=F
     """
     run_id = os.path.basename(run_dir.rstrip('/'))
     fastq_subdir = "fastq_pass_combined"
-    samplesheet_paths = sorted(glob.glob(os.path.join(run_dir, 'SampleSheet*.csv')))
+    samplesheet_paths = sorted(glob.glob(os.path.join(run_dir, 'sample_sheet_*.csv')))
     if not samplesheet_paths:
         if verbose:
             print(f"WARNING: Failed to find SampleSheet in: {run_dir}", file=sys.stderr)
         return [], fastq_subdir
 
-    all_samples = parse_samplesheet_gridion_custom(samplesheet_paths[0])
+    all_samples = parse_samplesheet_gridion(samplesheet_paths[0])
     candidate_samples = [s for s in all_samples if has_necessary_fields_for_symlinking(s, 'gridion')]
     for s in candidate_samples:
         s['sample_id'] = normalize_sample_id(s['sample_id'])

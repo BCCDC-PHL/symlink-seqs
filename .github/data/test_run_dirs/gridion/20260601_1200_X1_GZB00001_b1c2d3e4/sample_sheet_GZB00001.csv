@@ -1,0 +1,3 @@
+protocol_run_id,position_id,flow_cell_id,sample_id,experiment_id,flow_cell_product_code,kit,barcode,alias,type
+b1c2d3e4-0000-0000-0000-000000000000,X1,GZB00001,20260601_GZB00001,20260601_GZB00001,FLO-MIN114,,barcode01,SAMPLE-001_ecoli_test,test_sample
+b1c2d3e4-0000-0000-0000-000000000000,X1,GZB00001,20260601_GZB00001,20260601_GZB00001,FLO-MIN114,,barcode02,SAMPLE-002_ecoli_production,test_sample

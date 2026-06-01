@@ -154,12 +154,15 @@ def main(args):
     ]:
         all_checks.append({'test_name': label, 'test_passed': passed, '_msg': msg})
 
-    # GridION underscore normalisation: SAMPLE_001 in SampleSheet -> SAMPLE-001 in output
+    # GridION underscore project IDs: alias SAMPLE-001_ecoli_test -> project_id 'ecoli_test' preserved
     gridion_us = os.path.join(artifacts_dir, 'gridion_20260601_1200_X1_GZB00001_b1c2d3e4_all.csv')
+    gridion_us_filtered = os.path.join(artifacts_dir, 'gridion_20260601_1200_X1_GZB00001_b1c2d3e4_ecoli_test.csv')
     for label, passed, msg in [
-        ('gridion_underscore_row_count',  *check_csv_row_count(gridion_us, 2)),
-        ('gridion_underscore_sample_ids', *check_csv_sample_ids(gridion_us,
-            expected_ids={'SAMPLE-001', 'SAMPLE-002'})),
+        ('gridion_underscore_project_all_row_count',      *check_csv_row_count(gridion_us, 2)),
+        ('gridion_underscore_project_filter_row_count',   *check_csv_row_count(gridion_us_filtered, 1)),
+        ('gridion_underscore_project_filter_sample_ids',  *check_csv_sample_ids(gridion_us_filtered,
+            expected_ids={'SAMPLE-001'},
+            forbidden_ids={'SAMPLE-002'})),
     ]:
         all_checks.append({'test_name': label, 'test_passed': passed, '_msg': msg})
 
