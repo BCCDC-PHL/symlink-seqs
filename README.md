@@ -8,7 +8,7 @@ Create fastq symlinks for selected samples in sequencer output directories based
 
 ```
 usage: symlink-seqs [-h] [-p PROJECT_ID] [-r RUN_ID] [-i IDS_FILE] [-s] [-c CONFIG] [--copy] [--csv] [--skip-qc-status-check] [--exclude-run EXCLUDE_RUN] [--excluded-runs-file EXCLUDED_RUNS_FILE]
-                    [--excluded-libraries-file EXCLUDED_LIBRARIES_FILE] [--verbose] [-o OUTDIR]
+                    [--excluded-libraries-file EXCLUDED_LIBRARIES_FILE] [--verbose] [-v] [-o OUTDIR]
 
 optional arguments:
   -h, --help            show this help message and exit
@@ -31,6 +31,7 @@ optional arguments:
   --excluded-libraries-file EXCLUDED_LIBRARIES_FILE
                         File containing list of run ID, library ID pairs to exclude. (csv format, no header)
   --verbose             Print verbose output, including cases where run QC check output cannont be found.
+  -v, --version         Print version and exit.
   -o OUTDIR, --outdir OUTDIR
                         Output directory, where symlinks (or copies) will be created.
 ```
