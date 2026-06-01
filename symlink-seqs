@@ -131,7 +131,8 @@ def merge_config_with_args(config, args):
         config['copy'] = args.copy
     if 'csv' not in config:
         config['csv'] = args.csv
-    if 'project_id' not in config:
+    # Project ID from command-line overrides project ID in config.
+    if args.project_id:
         config['project_id'] = args.project_id
     if 'skip_qc_status_check' not in config:
         config['skip_qc_status_check'] = args.skip_qc_status_check
