@@ -2,6 +2,7 @@
 
 import argparse
 import csv
+from dataclasses import dataclass
 import glob
 import json
 import os
@@ -10,6 +11,23 @@ import sys
 import re
 
 VERSION = "0.1.1"
+
+# Run ID patterns for each supported sequencer type.
+MISEQ_RUN_ID_REGEX = r'\d{6}_M\d{5}_\d{4}_\d{9}-[A-Z0-9]{5}'
+NEXTSEQ_RUN_ID_REGEX = r'\d{6}_VH\d{5}_\d+_[A-Z0-9]{9}'
+GRIDION_RUN_ID_REGEX = r'\d{8}_\d{4}_X\d_[A-Z]{3}\d+_[a-z0-9]{8}'
+
+# Pattern for extracting read type (R1, R2, RL) from fastq filenames.
+READ_TYPE_REGEX = r'_(R[12L])[_\.]'
+
+
+@dataclass
+class FastqFile:
+    """Internal representation of a fastq file to be linked or copied."""
+    src: str
+    dest_filename: str
+    sample_id: str
+
 
 def jdump(x):
     """
@@ -113,7 +131,8 @@ def merge_config_with_args(config, args):
         config['copy'] = args.copy
     if 'csv' not in config:
         config['csv'] = args.csv
-    if 'project_id' not in config:
+    # Project ID from command-line overrides project ID in config.
+    if args.project_id:
         config['project_id'] = args.project_id
     if 'skip_qc_status_check' not in config:
         config['skip_qc_status_check'] = args.skip_qc_status_check
@@ -153,27 +172,21 @@ def camel_to_snake(name):
 
 def determine_sequencer_type(run_id):
     """
-    Determine sequencer type based on format of Run ID
-    Returns str ("miseq", "nextseq" or "gridion")
+    Determine sequencer type based on format of Run ID.
+    Returns "miseq", "nextseq", "gridion", or None.
 
     :param run_id:
     :type run_id: str
     :return: sequencer type
-    :rtype: str
+    :rtype: str|None
     """
-    miseq_regex = '\\d{6}_M\\d{5}_\\d{4}_\\d{9}-[A-Z0-9]{5}'
-    nextseq_regex = '\\d{6}_VH\\d{5}_\\d+_[A-Z0-9]{9}'
-    gridion_regex = '\\d{8}_\\d{4}_X\\d_[A-Z]{3}\\d+_[a-z0-9]{8}'
-
-    sequencer_type = None
-    if re.match(miseq_regex, run_id):
-        sequencer_type = "miseq"
-    elif re.match(nextseq_regex, run_id):
-        sequencer_type = "nextseq"
-    elif re.match(gridion_regex, run_id):
-        sequencer_type = "gridion"
-
-    return sequencer_type
+    if re.match(MISEQ_RUN_ID_REGEX, run_id):
+        return "miseq"
+    elif re.match(NEXTSEQ_RUN_ID_REGEX, run_id):
+        return "nextseq"
+    elif re.match(GRIDION_RUN_ID_REGEX, run_id):
+        return "gridion"
+    return None
 
 
 def determine_miseq_directory_structure(run_dir_path):
@@ -205,20 +218,19 @@ def find_miseq_fastq_subdir(run_dir_path):
     :param run_dir_path:
     :type run_dir_path: str
     :return: fastq subdir
-    :rtype: str
+    :rtype: str|None
     """
     fastq_subdir = None
     directory_structure = determine_miseq_directory_structure(run_dir_path)
     if directory_structure == "old":
         fastq_subdir = "Data/Intensities/BaseCalls"
     elif directory_structure == "new":
-        fastq_dirs = glob.glob(os.path.join(run_dir_path, 'Alignment_*', '*', 'Fastq'))
-        try:
-            fastq_dir = fastq_dirs[-1]
-            fastq_subdir = os.path.relpath(fastq_dir, run_dir_path)
-        except IndexError as e:
+        # Sort glob results so we always pick the latest Alignment_N/timestamp/Fastq deterministically.
+        fastq_dirs = sorted(glob.glob(os.path.join(run_dir_path, 'Alignment_*', '*', 'Fastq')))
+        if fastq_dirs:
+            fastq_subdir = os.path.relpath(fastq_dirs[-1], run_dir_path)
+        else:
             print("WARNING: Failed to find fastq_directory in: " + run_dir_path, file=sys.stderr)
-            fastq_subdir = None
 
     return fastq_subdir
 
@@ -291,170 +303,129 @@ def parse_samplesheet_nextseq(samplesheet_path):
     return cloud_data
 
 
-def parse_samplesheet_gridion_custom(samplesheet_path):
+def parse_samplesheet_gridion(samplesheet_path):
     """
-    Parse a custom GridION SampleSheet to get sample and project IDs.
-    Custom GridION SampleSheets are simple .csv files that must have the following three fields:
+    Parse an ONT GridION sample sheet, extracting sample_id and project_id from the alias field.
+    The alias field encodes both values as '{sample_id}_{project_id}'. Everything to the left
+    of the first underscore is the sample ID; everything to the right is the project ID.
 
-    sample_id
-    barcode
-    project_id
-
-    :param samplesheet_path:
+    :param samplesheet_path: Path to the sample sheet CSV
     :type samplesheet_path: str
-    :return: 
-    :rtype:
+    :return: List of sample dicts with 'sample_id', 'project_id', and 'barcode' keys
+    :rtype: list[dict]
     """
     samples = []
     with open(samplesheet_path, 'r') as f:
         reader = csv.DictReader(f)
         for row in reader:
-            samples.append(row)
-
+            alias = row.get('alias', '')
+            if not alias:
+                continue
+            parts = alias.split('_', 1)
+            sample_id = parts[0]
+            project_id = parts[1] if len(parts) > 1 else ''
+            samples.append({
+                'sample_id': sample_id,
+                'project_id': project_id,
+                'barcode': row.get('barcode', ''),
+            })
     return samples
 
 
-def has_necessary_fields_for_symlinking_miseq(sample):
+def normalize_sample_id(sample_id):
     """
-    Check if a 'sample' dictionary has the necessary fields for symlinking
-    Returns bool (True if ready for symlinking, false otherwise)
+    Convert underscores to hyphens in a sample ID, matching sequencer filename behavior.
+    Applied uniformly across all sequencer types before matching and globbing.
+
+    :param sample_id:
+    :type sample_id: str
+    :return: normalized sample ID
+    :rtype: str
+    """
+    return sample_id.replace('_', '-')
+
+
+def has_necessary_fields_for_symlinking(sample, sequencer_type):
+    """
+    Check if a sample dict has the fields required for symlinking, given the sequencer type.
+    For MiSeq, also populates sample_name from sample_id when sample_name is absent.
 
     :param sample:
     :type sample: dict[str, str]
-    :return: Whether or not the sample has the appropriate fields necessary for symlinking
-    :rtype bool:
+    :param sequencer_type: "miseq", "nextseq", or "gridion"
+    :type sequencer_type: str
+    :return: Whether or not the sample has the fields necessary for symlinking
+    :rtype: bool
     """
-    selected = False
-    conditions = []
-    if 'sample_name' in sample and sample['sample_name'] != "":
-        conditions.append(True)
-    elif 'sample_id' in sample and sample['sample_id'] != "":
-        sample['sample_name'] = sample['sample_id']
-        conditions.append(True)
-    else:
-        conditions.append(False)
-
-    if 'sample_project' in sample:
-        conditions.append(True)
-    else:
-        conditions.append(False)
-
-    if all(conditions):
-        selected = True
-
-    return selected
-
-
-def has_necessary_fields_for_symlinking_nextseq(sample):
-    """
-    Check if a 'sample' dictionary has the necessary fields for symlinking
-    Returns bool (True if ready for symlinking, false otherwise)
-
-    :param sample:
-    :type sample: dict[str, str]
-    :return: Whether or not the sample has the appropriate fields necessary for symlinking
-    :rtype bool:
-    """
-    selected = False
-    conditions = []
-    if 'sample_id' in sample and sample['sample_id'] != "":
-        conditions.append(True)
-    else:
-        conditions.append(False)
-
-    if 'project_name' in sample:
-        conditions.append(True)
-    else:
-        conditions.append(False)
-
-    if all(conditions):
-        selected = True
-
-    return selected
-
-
-def has_necessary_fields_for_symlinking_gridion(sample):
-    """
-    Check if a 'sample' dictionary has the necessary fields for symlinking
-    Returns bool (True if ready for symlinking, false otherwise)
-
-    :param sample:
-    :type sample: dict[str, str]
-    :return: Whether or not the sample has the appropriate fields necessary for symlinking
-    :rtype bool:
-    """
-    selected = False
-    conditions = []
-    if 'sample_id' in sample and sample['sample_id'] != "":
-        conditions.append(True)
-    else:
-        conditions.append(False)
-
-    if 'project_id' in sample:
-        conditions.append(True)
-    else:
-        conditions.append(False)
-
-    if all(conditions):
-        selected = True
-
-    return selected
+    if sequencer_type == 'miseq':
+        if sample.get('sample_name'):
+            pass
+        elif sample.get('sample_id'):
+            sample['sample_name'] = sample['sample_id']
+        else:
+            return False
+        return 'sample_project' in sample
+    elif sequencer_type == 'nextseq':
+        return bool(sample.get('sample_id')) and 'project_name' in sample
+    elif sequencer_type == 'gridion':
+        return bool(sample.get('sample_id'))
+    return False
 
 
 def get_latest_analysis_subdir(run_dir):
     """
-    For nextseq runs, there may be multiple `Analysis` sub-directories. We want to symlink to the files in the latest one.
+    For NextSeq runs, there may be multiple Analysis sub-directories.
+    Selects the latest by sorting directory names numerically where possible.
+    Returns None if the Analysis directory does not exist or is empty.
 
     :param run_dir:
     :type run_dir: str
-    :return: Path to latest analysis subdir, or None if the Analysis dir does not exist.
+    :return: Path to latest analysis subdir, or None
     :rtype: str|None
     """
-    analysis_dir = os.path.join(os.path.join(run_dir, "Analysis"))
-    if os.path.exists(analysis_dir):
-        analysis_subdirs = os.listdir(analysis_dir)
-        latest_analysis_subdir_num = analysis_subdirs[-1]
-        latest_analysis_subdir = os.path.abspath(os.path.join(run_dir, "Analysis", latest_analysis_subdir_num))
-    else:
-        latest_analysis_subdir = None
-
-    return latest_analysis_subdir
-    
-    return latest_analysis_subdir
+    analysis_dir = os.path.join(run_dir, "Analysis")
+    if not os.path.exists(analysis_dir):
+        return None
+    subdirs = os.listdir(analysis_dir)
+    if not subdirs:
+        return None
+    subdirs_sorted = sorted(subdirs, key=lambda x: int(x) if x.isdigit() else x)
+    return os.path.abspath(os.path.join(run_dir, "Analysis", subdirs_sorted[-1]))
 
 
-def create_symlinks(src_dest_paths, outdir):
+def create_symlinks(fastq_files, outdir):
     """
-    Symlink src to dest for each element in src_dest_paths
+    Create a symlink in outdir for each FastqFile.
+    Silently skips files that are already symlinked (errno 17 / EEXIST).
 
-    :param src_dest_paths: list of dicts with keys "src" and "dest_filename"
-    :type src_dest_paths: list[dict[str, str]]
+    :param fastq_files: list of FastqFile records
+    :type fastq_files: list[FastqFile]
     :return: None
     :rtype: NoneType
     """
-    for paths in src_dest_paths:
-        dest_path = os.path.join(outdir, paths['dest_filename'])
+    for f in fastq_files:
+        dest_path = os.path.join(outdir, f.dest_filename)
         try:
-            os.symlink(paths['src'], dest_path)
+            os.symlink(f.src, dest_path)
         except OSError as e:
             if e.errno == 17:
                 pass
             else:
-                print(str(e) + ". files: " + paths['src'] + ", " + paths['dest'], file=sys.stderr)
+                print(f"{e}. files: {f.src}, {dest_path}", file=sys.stderr)
 
 
-def create_copies(src_dest_paths, outdir):
+def create_copies(fastq_files, outdir):
     """
-    Copy src to dest for each element in src_dest_paths
+    Copy each FastqFile source to outdir.
 
-    :param src_dest_paths: list of dicts with keys "src" and "dest_filename"
-    :type src_dest_paths: list[dict[str, str]]
+    :param fastq_files: list of FastqFile records
+    :type fastq_files: list[FastqFile]
     :return: None
     :rtype: NoneType
     """
-    for paths in src_dest_paths:
-        dest_path = os.path.join(outdir, paths['dest_filename'])
-        shutil.copy(paths['src'], dest_path)
+    for f in fastq_files:
+        dest_path = os.path.join(outdir, f.dest_filename)
+        shutil.copy(f.src, dest_path)
 
 
 def parse_ids_file(ids_file_path):
@@ -501,200 +472,283 @@ def simplify_fastq_filename(sample_id, original_filename):
     return dest_filename
 
 
+def select_miseq_samples(run_dir, normalized_sample_ids, project_id, verbose=False):
+    """
+    Locate the MiSeq SampleSheet and return samples matching the given IDs or project,
+    together with the path to the fastq subdirectory.
+
+    normalized_sample_ids should already have underscores converted to hyphens, or be None.
+
+    :param run_dir: Path to the MiSeq run directory
+    :type run_dir: str
+    :param normalized_sample_ids: Set of normalized sample IDs to filter on, or None
+    :type normalized_sample_ids: set[str]|None
+    :param project_id: Project ID to filter on, or None
+    :type project_id: str|None
+    :return: (selected_samples, fastq_subdir)
+    :rtype: tuple[list[dict], str|None]
+    """
+    run_id = os.path.basename(run_dir.rstrip('/'))
+    miseq_dir_type = determine_miseq_directory_structure(run_dir)
+    fastq_subdir = find_miseq_fastq_subdir(run_dir)
+
+    samplesheet_path = None
+    if miseq_dir_type == 'old':
+        paths = sorted(glob.glob(os.path.join(run_dir, 'SampleSheet*.csv')))
+        if paths:
+            samplesheet_path = paths[0]
+    elif miseq_dir_type == 'new' and fastq_subdir is not None:
+        timestamped_dir = os.path.dirname(os.path.join(run_dir, fastq_subdir))
+        candidate = os.path.join(timestamped_dir, 'SampleSheetUsed.csv')
+        if os.path.exists(candidate):
+            samplesheet_path = candidate
+
+    if not samplesheet_path:
+        if verbose:
+            print(f"WARNING: Failed to find SampleSheet for run {run_id}", file=sys.stderr)
+        return [], fastq_subdir
+
+    all_samples = parse_samplesheet_miseq(samplesheet_path)
+    candidate_samples = [s for s in all_samples if has_necessary_fields_for_symlinking(s, 'miseq')]
+    for s in candidate_samples:
+        s['sample_id'] = normalize_sample_id(s['sample_id'])
+        s['sample_name'] = normalize_sample_id(s['sample_name'])
+
+    if normalized_sample_ids:
+        selected = [s for s in candidate_samples
+                    if s['sample_id'] in normalized_sample_ids
+                    or s['sample_name'] in normalized_sample_ids]
+    elif project_id is not None:
+        selected = [s for s in candidate_samples if s['sample_project'] == project_id]
+    else:
+        selected = candidate_samples
+
+    return selected, fastq_subdir
+
+
+def select_nextseq_samples(run_dir, normalized_sample_ids, project_id, verbose=False):
+    """
+    Locate the NextSeq SampleSheet and return samples matching the given IDs or project,
+    together with the path to the fastq subdirectory.
+
+    normalized_sample_ids should already have underscores converted to hyphens, or be None.
+
+    :param run_dir: Path to the NextSeq run directory
+    :type run_dir: str
+    :param normalized_sample_ids: Set of normalized sample IDs to filter on, or None
+    :type normalized_sample_ids: set[str]|None
+    :param project_id: Project ID to filter on, or None
+    :type project_id: str|None
+    :return: (selected_samples, fastq_subdir)
+    :rtype: tuple[list[dict], str|None]
+    """
+    run_id = os.path.basename(run_dir.rstrip('/'))
+    analysis_subdir = get_latest_analysis_subdir(run_dir)
+    if analysis_subdir is None:
+        if verbose:
+            print(f"WARNING: No Analysis directory found for run {run_id}", file=sys.stderr)
+        return [], None
+
+    fastq_subdir = os.path.join(analysis_subdir, 'Data', 'fastq')
+    samplesheet_paths = sorted(glob.glob(os.path.join(analysis_subdir, 'Data', 'SampleSheet*.csv')))
+    if not samplesheet_paths:
+        if verbose:
+            print(f"WARNING: Failed to find SampleSheet in: {run_dir}", file=sys.stderr)
+        return [], fastq_subdir
+
+    all_samples = parse_samplesheet_nextseq(samplesheet_paths[0])
+    candidate_samples = [s for s in all_samples if has_necessary_fields_for_symlinking(s, 'nextseq')]
+    for s in candidate_samples:
+        s['sample_id'] = normalize_sample_id(s['sample_id'])
+
+    if normalized_sample_ids:
+        selected = [s for s in candidate_samples if s['sample_id'] in normalized_sample_ids]
+    elif project_id is not None:
+        selected = [s for s in candidate_samples if s['project_name'] == project_id]
+    else:
+        selected = candidate_samples
+
+    return selected, fastq_subdir
+
+
+def select_gridion_samples(run_dir, normalized_sample_ids, project_id, verbose=False):
+    """
+    Locate the GridION SampleSheet and return samples matching the given IDs or project,
+    together with the path to the fastq subdirectory.
+
+    normalized_sample_ids should already have underscores converted to hyphens, or be None.
+
+    :param run_dir: Path to the GridION run directory
+    :type run_dir: str
+    :param normalized_sample_ids: Set of normalized sample IDs to filter on, or None
+    :type normalized_sample_ids: set[str]|None
+    :param project_id: Project ID to filter on, or None
+    :type project_id: str|None
+    :return: (selected_samples, fastq_subdir)
+    :rtype: tuple[list[dict], str|None]
+    """
+    run_id = os.path.basename(run_dir.rstrip('/'))
+    fastq_subdir = "fastq_pass_combined"
+    samplesheet_paths = sorted(glob.glob(os.path.join(run_dir, 'sample_sheet_*.csv')))
+    if not samplesheet_paths:
+        if verbose:
+            print(f"WARNING: Failed to find SampleSheet in: {run_dir}", file=sys.stderr)
+        return [], fastq_subdir
+
+    all_samples = parse_samplesheet_gridion(samplesheet_paths[0])
+    candidate_samples = [s for s in all_samples if has_necessary_fields_for_symlinking(s, 'gridion')]
+    for s in candidate_samples:
+        s['sample_id'] = normalize_sample_id(s['sample_id'])
+
+    if normalized_sample_ids:
+        selected = [s for s in candidate_samples if s['sample_id'] in normalized_sample_ids]
+    elif project_id is not None:
+        selected = [s for s in candidate_samples if s['project_id'] == project_id]
+    else:
+        selected = candidate_samples
+
+    return selected, fastq_subdir
+
+
 def get_fastq_paths(config, run_dir, sample_ids, project_id, verbose=False):
     """
-    Get paths to source and destination of fastq files.
+    Get paths to source and destination of fastq files for a single run directory.
 
-    :param config:
+    :param config: Merged config dict
     :type config: dict[str, object]
-    :param run_dir:
+    :param run_dir: Path to the sequencing run directory
     :type run_dir: str
-    :param sample_ids:
-    :type sample_ids: Iterable|NoneType
-    :return: List of dicts with the keys: src, dest_filename, sample_id
-    :rtype: list[dict[str, str]]
+    :param sample_ids: Collection of sample IDs to filter on, or empty/None for no ID filter
+    :type sample_ids: set[str]|None
+    :param project_id: Project ID to filter on, or None
+    :type project_id: str|None
+    :return: List of FastqFile records
+    :rtype: list[FastqFile]
     """
-
     run_id = os.path.basename(run_dir.rstrip('/'))
     sequencer_type = determine_sequencer_type(run_id)
-    selected_samples = []
-    fastq_subdir = None
-    fastq_paths = []
+    if sequencer_type is None:
+        return []
 
-    fixed_sample_ids = []
-    for sample_id in sample_ids:
-        fixed_sample_ids.append(sample_id.replace('_', '-'))
+    # Normalize user-supplied IDs once, before dispatching to sequencer-specific helpers.
+    normalized_sample_ids = {normalize_sample_id(s) for s in sample_ids} if sample_ids else None
 
     if sequencer_type == 'miseq':
-        miseq_dir_type = determine_miseq_directory_structure(run_dir)
-        fastq_subdir = find_miseq_fastq_subdir(run_dir)
-
-        samplesheet_path = None
-        if miseq_dir_type == 'old':
-            samplesheet_glob = os.path.join(run_dir, 'SampleSheet*.csv')
-            samplesheet_paths = glob.glob(samplesheet_glob)
-            if len(samplesheet_paths) > 0:
-                samplesheet_path = samplesheet_paths[0]
-            
-        elif miseq_dir_type == 'new':
-            timestamped_fastq_parent_dir = os.path.dirname(os.path.join(run_dir, fastq_subdir))
-            samplesheet_path = os.path.join(timestamped_fastq_parent_dir, 'SampleSheetUsed.csv')
-
-        if not samplesheet_path and verbose:
-            print(f"ERROR: Failed to find SampleSheet for run {run_id}", file=sys.stderr)
-            
-        all_samples = parse_samplesheet_miseq(samplesheet_path)
-        candidate_samples = list(filter(has_necessary_fields_for_symlinking_miseq, all_samples))
-        # Occasionally sample IDs in the SampleSheet will include underscore characters, which are
-        # automatically converted to dashes in the fastq filename. Need to convert them here prior to matching.
-        for sample in candidate_samples:
-            sample['sample_id'] = sample['sample_id'].replace('_', '-')
-            sample['sample_name'] = sample['sample_name'].replace('_', '-')
-        if sample_ids is not None:
-            selected_samples = list(filter(lambda x: x['sample_id'] in fixed_sample_ids or x['sample_name'] in fixed_sample_ids, candidate_samples))
-        elif project_id is not None:
-            selected_samples = list(filter(lambda x: x['sample_project'] == project_id, candidate_samples))
-        else:
-            selected_samples = candidate_samples
-        
+        selected_samples, fastq_subdir = select_miseq_samples(run_dir, normalized_sample_ids, project_id, verbose)
     elif sequencer_type == 'nextseq':
-        analysis_subdir = get_latest_analysis_subdir(run_dir)
-        if analysis_subdir is not None:
-            fastq_subdir = os.path.join(analysis_subdir, 'Data', 'fastq')
-            samplesheet_paths = glob.glob(os.path.join(analysis_subdir, 'Data', 'SampleSheet*.csv'))
-            if len(samplesheet_paths) > 0:
-                samplesheet_path = samplesheet_paths[0] # If multiple samplesheets exist, how do we choose the correct one?
-                all_samples = parse_samplesheet_nextseq(samplesheet_path)
-            else:
-                if verbose:
-                    print("WARNING: Failed to find SampleSheet in: " + run_dir, file=sys.stderr)
-                all_samples = []
-            candidate_samples = list(filter(has_necessary_fields_for_symlinking_nextseq, all_samples))
-            # Occasionally sample IDs in the SampleSheet will include underscore characters, which are
-            # automatically converted to dashes in the fastq filename. Need to convert them here prior to matching.
-            for sample in candidate_samples:
-                sample['sample_id'] = sample['sample_id'].replace('_', '-')
-            if sample_ids is not None:
-                selected_samples = filter(lambda x: x['sample_id'] in fixed_sample_ids, candidate_samples)
-            elif project_id is not None:
-                selected_samples = filter(lambda x: x['project_name'] == project_id, candidate_samples)
-            else:
-                selected_samples = candidate_samples
-        else:
-            selected_samples = []
-
+        selected_samples, fastq_subdir = select_nextseq_samples(run_dir, normalized_sample_ids, project_id, verbose)
     elif sequencer_type == 'gridion':
-        fastq_subdir = "fastq_pass_combined"
-        samplesheet_paths = glob.glob(os.path.join(run_dir, 'SampleSheet*.csv'))
-        if len(samplesheet_paths) > 0:
-            samplesheet_path = samplesheet_paths[0]
-            all_samples = parse_samplesheet_gridion_custom(samplesheet_path)
-        else:
-            if verbose:
-                print("WARNING: Failed to find SampleSheet in: " + run_dir, file=sys.stderr)
-            all_samples = []
-        candidate_samples = filter(has_necessary_fields_for_symlinking_gridion, all_samples)
-        if sample_ids is not None:
-            selected_samples = filter(lambda x: x['sample_id'] in sample_ids, candidate_samples)
-        elif project_id is not None:
-            selected_samples = filter(lambda x: x['project_name'] == project_id, candidate_samples)
-        else:
-            selected_samples = candidate_samples
+        selected_samples, fastq_subdir = select_gridion_samples(run_dir, normalized_sample_ids, project_id, verbose)
+    else:
+        return []
 
-    # Skip run if fastq_subdir cannot be determined
     if fastq_subdir is None:
         return []
 
+    fastq_files = []
     for sample in selected_samples:
-        sample_id = None
-        if sequencer_type == 'miseq':
-            sample_id = sample['sample_name']
-        elif sequencer_type == 'nextseq':
-            sample_id = sample['sample_id']
-        elif sequencer_type == 'gridion':
-            sample_id = sample['sample_id']
-
-        if sample_id is None:
-            # Skip sample if sample_id cannot be determined
+        sample_id = sample['sample_name'] if sequencer_type == 'miseq' else sample['sample_id']
+        if not sample_id:
             continue
 
-        sample_fastq_files = glob.glob(os.path.join(run_dir, fastq_subdir, sample_id + '_*.fastq'))
-        sample_fastq_gz_files = glob.glob(os.path.join(run_dir, fastq_subdir, sample_id + '_*.fastq.gz'))
-        for sample_fastq_file in sample_fastq_files + sample_fastq_gz_files:
-            if os.path.exists(sample_fastq_file):
-                src = os.path.abspath(sample_fastq_file)
-                dest_filename = os.path.basename(sample_fastq_file)
-                sample_id = dest_filename.split('_')[0]
-                if config['simplify_sample_id']:
-                    dest_filename = simplify_fastq_filename(sample_id, dest_filename)
+        matched = (
+            glob.glob(os.path.join(run_dir, fastq_subdir, sample_id + '_*.fastq')) +
+            glob.glob(os.path.join(run_dir, fastq_subdir, sample_id + '_*.fastq.gz'))
+        )
+        for path in matched:
+            if os.path.exists(path):
+                src = os.path.abspath(path)
+                dest_filename = os.path.basename(path)
+                resolved_id = dest_filename.split('_')[0]
+                if config.get('simplify_sample_id'):
+                    dest_filename = simplify_fastq_filename(resolved_id, dest_filename)
+                fastq_files.append(FastqFile(src=src, dest_filename=dest_filename, sample_id=resolved_id))
 
-                fastq_paths.append({"src": src, "dest_filename": dest_filename, "sample_id": sample_id})
-
-    return fastq_paths
+    return fastq_files
 
 
 def determine_read_type(fastq_path):
     """
     Determine whether the fastq is an R1, R2 or RL file.
 
-    :param fastq_paths:
-    :type fastq_paths: str 
-    :return: "R1" "R2" or "RL", or None if the read type cannot be determined.
+    :param fastq_path:
+    :type fastq_path: str
+    :return: "R1", "R2", "RL", or None if the read type cannot be determined.
     :rtype: str|None
     """
-    read_type = None
-    read_type_regex = "_(R[12L])[_\\.]"
-    read_type_match = re.search(read_type_regex, fastq_path)
-    if read_type_match:
-        read_type = read_type_match.group(1)
+    m = re.search(READ_TYPE_REGEX, fastq_path)
+    return m.group(1) if m else None
 
-    return read_type
-    
 
-def pair_fastq_paths(fastq_paths):
+def pair_fastq_paths(fastq_files):
     """
-    Determine whether the fastq is an R1, R2 or RL file.
+    Group FastqFile records by sample ID and produce paired records for CSV output.
+    Long-read (RL) files are mapped to R1 for pipeline input compatibility.
 
-    :param fastq_paths: List of dicts with fields: ['sample_id', 'src']
-    :type fastq_paths: list[dict[str, str]]
-    :return: List of dicts with fields: ['ID', 'R1', 'R2']
+    :param fastq_files: List of FastqFile records
+    :type fastq_files: list[FastqFile]
+    :return: List of dicts with fields: ID, R1, R2
     :rtype: list[dict[str, str]]
     """
-    paired_fastq_paths_by_sample_id = {}
-    for fastq_path in fastq_paths:
-        sample_id = fastq_path['sample_id']
-        read_type = determine_read_type(fastq_path['src'])
-        if sample_id not in paired_fastq_paths_by_sample_id:
-            paired_fastq_paths_by_sample_id[sample_id] = {'ID': sample_id}
-            paired_fastq_paths_by_sample_id[sample_id][read_type] = fastq_path['src']
-        else:
-            paired_fastq_paths_by_sample_id[sample_id][read_type] = fastq_path['src']
+    paired = {}
+    for f in fastq_files:
+        read_type = determine_read_type(f.src)
+        if f.sample_id not in paired:
+            paired[f.sample_id] = {'ID': f.sample_id}
+        if read_type == 'RL':
+            # Long reads have no R2; map to R1 for downstream pipeline input.
+            paired[f.sample_id]['R1'] = f.src
+        elif read_type is not None:
+            paired[f.sample_id][read_type] = f.src
 
-    paired_fastq_paths = sorted(paired_fastq_paths_by_sample_id.values(), key=lambda x: x['ID'])
-
-    return paired_fastq_paths
+    return sorted(paired.values(), key=lambda x: x['ID'])
 
 
 def check_qc_status(run_dir, verbose=False):
     """
-    Check the status of the QC check for a run.
+    Check the QC status for a run by reading qc_check_complete.json.
+    Returns "PASS", "FAIL", or None if the file is absent or cannot be parsed.
 
     :param run_dir:
     :type run_dir: str
-    :return: "PASS" or "FAIL" (or None if the qc_check_complete.json file does not exist)
+    :return: "PASS", "FAIL", or None
     :rtype: str|None
     """
-    qc_status = None
     qc_status_path = os.path.join(run_dir, 'qc_check_complete.json')
-    if os.path.exists(qc_status_path):
-        with open(qc_status_path, 'r') as f:
-            qc_check = json.load(f)
-            qc_status = qc_check['overall_pass_fail']
-    else:
+    if not os.path.exists(qc_status_path):
         if verbose:
             print("WARNING: QC check file not found in: " + run_dir, file=sys.stderr)
+        return None
+    try:
+        with open(qc_status_path, 'r') as f:
+            qc_check = json.load(f)
+        return qc_check.get('overall_pass_fail')
+    except (json.decoder.JSONDecodeError, KeyError) as e:
+        if verbose:
+            print(f"WARNING: Failed to parse QC check file in {run_dir}: {e}", file=sys.stderr)
+        return None
 
-    return qc_status
+
+def should_skip_run(run_dir, config, run_id, verbose=False):
+    """
+    Determine whether a sequencing run should be skipped due to exclusion rules or QC status.
+
+    :param run_dir:
+    :type run_dir: str
+    :param config:
+    :type config: dict[str, object]
+    :param run_id:
+    :type run_id: str
+    :return: (skip, reason) tuple
+    :rtype: tuple[bool, str|None]
+    """
+    if run_id in config.get('excluded_runs', set()):
+        return True, "excluded"
+    if not config.get('skip_qc_status_check', False):
+        qc_status = check_qc_status(run_dir, verbose)
+        if qc_status != 'PASS':
+            return True, f"QC status {qc_status!r}"
+    return False, None
 
 
 def main(args):
@@ -706,67 +760,64 @@ def main(args):
     config = parse_config(args.config)
     config = merge_config_with_args(config, args)
     verbose = config.get('verbose', False)
-    if not config.get('csv', False) and not config.get('outdir', None):
+    outdir = config.get('outdir', None)
+
+    if not config.get('csv', False) and not outdir:
         print('ERROR: Please provide -o or --outdir when creating symlinks')
         exit(-1)
 
-    if args.outdir and not os.path.exists(args.outdir):
-        os.makedirs(args.outdir, exist_ok=True)
+    if outdir and not os.path.exists(outdir):
+        os.makedirs(outdir, exist_ok=True)
 
-    sample_ids = []
+    sample_ids = set()
     if args.ids_file is not None:
         sample_ids = parse_ids_file(args.ids_file)
 
-    # In csv-mode, need to write the header once, before we start
-    # looping over runs.
-    if config.get('csv', None):
+    # In csv-mode, write the header once before the run loop.
+    writer = None
+    if config.get('csv', False):
         output_fieldnames = ['ID', 'R1', 'R2']
-        writer = csv.DictWriter(sys.stdout, fieldnames=output_fieldnames)
+        writer = csv.DictWriter(sys.stdout, fieldnames=output_fieldnames, extrasaction='ignore')
         writer.writeheader()
 
     for run_parent_dir in config['sequencing_run_parent_dirs']:
         run_parent_dir_contents = list(map(lambda x: os.path.abspath(os.path.join(run_parent_dir, x)), os.listdir(run_parent_dir)))
-
         run_dirs = list(filter(lambda x: os.path.isdir(x), run_parent_dir_contents))
 
-        # If a run ID is supplied by the `--run-id` flag, only symlink samples for that run.
+        # If a run ID is supplied by the `--run-id` flag, only process that run.
         if args.run_id is not None:
             run_dirs = list(filter(lambda x: os.path.basename(x) == args.run_id, run_dirs))
 
         for run_dir in run_dirs:
-            sequencing_run_id = os.path.basename(run_dir.rstrip('/'))
-            if sequencing_run_id in config['excluded_runs'] and verbose:
-                print(f"INFO: Skipping run {sequencing_run_id} due to exclusion: {run_dir}", file=sys.stderr)
+            run_id = os.path.basename(run_dir.rstrip('/'))
+
+            skip, reason = should_skip_run(run_dir, config, run_id, verbose)
+            if skip:
+                if verbose:
+                    print(f"INFO: Skipping run {run_id}: {reason}", file=sys.stderr)
                 continue
-            if not config.get('skip_qc_status_check', False):
-                qc_status = check_qc_status(run_dir, verbose)
-                if qc_status == None or qc_status != 'PASS':
-                    if verbose:
-                        print(f"WARNING: Skipping run due to failed QC: {run_dir}", file=sys.stderr)
+
+            # Apply per-run library exclusions to the sample ID filter set.
+            excluded_libs = config['excluded_libraries_by_sequencing_run_id'].get(run_id, set())
+            # When sample_ids were specified but all are excluded for this run, skip the run
+            # rather than falling through to project-based selection.
+            if sample_ids:
+                effective_sample_ids = sample_ids - excluded_libs
+                if not effective_sample_ids:
                     continue
-
-            included_sample_ids = []
-            if sequencing_run_id in config['excluded_libraries_by_sequencing_run_id']:
-                excluded_sample_ids = config['excluded_libraries_by_sequencing_run_id'][sequencing_run_id]
-                for sample_id in sample_ids:
-                    if sample_id not in excluded_sample_ids:
-                        included_sample_ids.append(sample_id)
             else:
-                included_sample_ids = sample_ids
+                effective_sample_ids = None
 
-            fastq_paths = get_fastq_paths(config, run_dir, included_sample_ids, args.project_id, args.verbose)
+            fastq_files = get_fastq_paths(config, run_dir, effective_sample_ids, config.get('project_id'), verbose)
 
             if config.get('copy', False):
-                create_copies(fastq_paths, args.outdir)
+                create_copies(fastq_files, outdir)
             elif config.get('csv', False):
-                paired_fastq_paths = pair_fastq_paths(fastq_paths)
-                if len(paired_fastq_paths) > 0:
-                    output_fieldnames = ['ID', 'R1', 'R2']
-                    writer = csv.DictWriter(sys.stdout, fieldnames=output_fieldnames)
-                    for row in paired_fastq_paths:
+                for row in pair_fastq_paths(fastq_files):
+                    if writer:
                         writer.writerow(row)
             else:
-                create_symlinks(fastq_paths, args.outdir)
+                create_symlinks(fastq_files, outdir)
 
 
 if __name__ == '__main__':

@@ -8,6 +8,7 @@ import json
 
 
 def main(args):
+    random.seed(args.seed)
     run_dirs_glob = os.path.join(args.simulated_runs_dir, '*', '*', '*')
     run_dirs = glob.glob(run_dirs_glob)
     for run_dir in run_dirs:
@@ -27,5 +28,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--simulated-runs-dir')
     parser.add_argument('--proportion-failed', default=0.1, type=float)
+    parser.add_argument('--seed', default=42, type=int)
     args = parser.parse_args()
     main(args)

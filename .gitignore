@@ -3,3 +3,8 @@ test_*
 dev-config.json
 artifacts
 illumina-run-simulator.jar
+.clj-kondo
+.lsp
+.portal
+__pycache__
+.github/scripts/__pycache__
