@@ -8,7 +8,7 @@ Create fastq symlinks for selected samples in sequencer output directories based
 
 ```
 usage: symlink-seqs [-h] [-p PROJECT_ID] [-r RUN_ID] [-i IDS_FILE] [-s] [-c CONFIG] [--copy] [--csv] [--skip-qc-status-check] [--exclude-run EXCLUDE_RUN] [--excluded-runs-file EXCLUDED_RUNS_FILE]
-                    [--excluded-libraries-file EXCLUDED_LIBRARIES_FILE] [-o OUTDIR]
+                    [--excluded-libraries-file EXCLUDED_LIBRARIES_FILE] [--verbose] [-o OUTDIR]
 
 optional arguments:
   -h, --help            show this help message and exit
