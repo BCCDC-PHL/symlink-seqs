@@ -760,18 +760,21 @@ def main(args):
     config = parse_config(args.config)
     config = merge_config_with_args(config, args)
     verbose = config.get('verbose', False)
-    if not config.get('csv', False) and not config.get('outdir', None):
+    outdir = config.get('outdir', None)
+
+    if not config.get('csv', False) and not outdir:
         print('ERROR: Please provide -o or --outdir when creating symlinks')
         exit(-1)
 
-    if args.outdir and not os.path.exists(args.outdir):
-        os.makedirs(args.outdir, exist_ok=True)
+    if outdir and not os.path.exists(outdir):
+        os.makedirs(outdir, exist_ok=True)
 
     sample_ids = set()
     if args.ids_file is not None:
         sample_ids = parse_ids_file(args.ids_file)
 
     # In csv-mode, write the header once before the run loop.
+    writer = None
     if config.get('csv', False):
         output_fieldnames = ['ID', 'R1', 'R2']
         writer = csv.DictWriter(sys.stdout, fieldnames=output_fieldnames, extrasaction='ignore')
@@ -808,12 +811,13 @@ def main(args):
             fastq_files = get_fastq_paths(config, run_dir, effective_sample_ids, config.get('project_id'), verbose)
 
             if config.get('copy', False):
-                create_copies(fastq_files, args.outdir)
+                create_copies(fastq_files, outdir)
             elif config.get('csv', False):
                 for row in pair_fastq_paths(fastq_files):
-                    writer.writerow(row)
+                    if writer:
+                        writer.writerow(row)
             else:
-                create_symlinks(fastq_files, args.outdir)
+                create_symlinks(fastq_files, outdir)
 
 
 if __name__ == '__main__':
