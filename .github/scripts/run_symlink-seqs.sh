@@ -1,5 +1,7 @@
 #!/bin/bash
 
+rm -rf artifacts/symlink-seqs
+
 mkdir -p artifacts/symlink-seqs
 
 ./symlink-seqs \

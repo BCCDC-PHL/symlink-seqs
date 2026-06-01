@@ -1,5 +1,7 @@
 #!/bin/bash
 
+rm -rf artifacts/simulated_runs
+
 mkdir -p artifacts/simulated_runs/{M00123,M00456,VH00123}/22
 
 timeout 10 java -jar illumina-run-simulator.jar \

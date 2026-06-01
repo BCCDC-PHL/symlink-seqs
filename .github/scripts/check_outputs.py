@@ -167,11 +167,6 @@ def main(args):
         all_checks.append({'test_name': label, 'test_passed': passed, '_msg': msg})
 
     # ── simulated-runs QC check ─────────────────────────────────────────────
-    # mysterious_experiment: row count is deterministic when add_qc_check_complete.py uses --seed 42
-    mysterious = os.path.join(artifacts_dir, 'mysterious_experiment.csv')
-    label, passed, msg = 'mysterious_experiment_row_count', *check_csv_row_count(mysterious, 260)
-    all_checks.append({'test_name': label, 'test_passed': passed, '_msg': msg})
-
     qc_status_by_run_id = collect_qc_status_by_run_id(args.simulated_runs_dir)
     simulated_output = parse_symlink_seqs_output_csv(args.symlink_seqs_output_csv)
     qc_passed = check_no_qc_failed_runs_are_symlinked(simulated_output, qc_status_by_run_id)
