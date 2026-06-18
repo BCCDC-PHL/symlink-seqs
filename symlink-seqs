@@ -145,14 +145,14 @@ def parse_config(config_path):
     """
     config_dict = {}
     if not os.path.exists(config_path):
-        logging.error("config file does not exist: " + config_path)
+        logging.error(f"Config file does not exist: {config_path}")
         exit(-1)
 
     with open(config_path, 'r') as f:
         try:
             config_dict = json.load(f)
         except json.decoder.JSONDecodeError as e:
-            logging.error("Error parsing config file: " + config_path)
+            logging.error(f"Error parsing config file: {config_path}")
             print(e, file=sys.stderr)
             exit(-1)
 
