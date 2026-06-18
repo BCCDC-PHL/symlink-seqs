@@ -2,6 +2,7 @@
     "sequencing_run_parent_dirs": [
 	".github/data/test_run_dirs/miseq",
 	".github/data/test_run_dirs/nextseq",
+	".github/data/test_run_dirs/i100",
 	".github/data/test_run_dirs/gridion"
     ],
     "simplify_sample_id": true

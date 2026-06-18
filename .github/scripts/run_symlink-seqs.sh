@@ -17,12 +17,19 @@ mkdir -p artifacts/symlink-seqs
     --csv \
     > artifacts/symlink-seqs/miseq_251202_M04446_0426_000000000-M7L2J_alignment_2_samples_with_underscores.csv
 
-./symlink-seqs\
+./symlink-seqs \
     --config .github/data/symlink-seqs/configs/test_run_dirs_config.json \
     --run-id 240719_VH00278_220_AAFMTYGM5 \
     --project-id 'project-2' \
     --csv \
     > artifacts/symlink-seqs/nextseq_240719_VH00278_220_AAFMTYGM5_alignment_1_project-2.csv
+
+./symlink-seqs \
+    --config .github/data/symlink-seqs/configs/test_run_dirs_config.json \
+    --run-id 20260601_SH00789_0007_ASCQ2G973-SC3 \
+    --ids-file .github/data/symlink-seqs/sample_id_lists/i100_selected_samples.csv \
+    --csv \
+    > artifacts/symlink-seqs/i100_20260601_SH00789_0007_ASCQ2G973-SC3_selected_samples.csv
 
 ./symlink-seqs \
     --config .github/data/symlink-seqs/configs/test_run_dirs_config.json \

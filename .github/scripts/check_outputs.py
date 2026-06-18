@@ -39,13 +39,14 @@ def parse_symlink_seqs_output_csv(symlink_seqs_output_csv):
     MISEQ_REGEX = r'\d{6}_M\d{5}_\d{4}_\d{9}-[A-Z0-9]{5}'
     NEXTSEQ_REGEX = r'\d{6}_VH\d{5}_\d+_[A-Z0-9]{9}'
     GRIDION_REGEX = r'\d{8}_\d{4}_X\d_[A-Z]{3}\d+_[a-z0-9]{8}'
+    I100_RUN_ID_REGEX = r'\d{8}_SH\d{5}_\d+_[A-Z0-9]{10}-[A-Z0-9]{3}'
     rows = []
     with open(symlink_seqs_output_csv, 'r') as f:
         reader = csv.DictReader(f)
         for row in reader:
             r1 = row.get('R1', '')
             run_id = None
-            for pattern in (GRIDION_REGEX, NEXTSEQ_REGEX, MISEQ_REGEX):
+            for pattern in (GRIDION_REGEX, NEXTSEQ_REGEX, MISEQ_REGEX,I100_RUN_ID_REGEX):
                 m = re.search(pattern, r1)
                 if m:
                     run_id = m.group(0)
@@ -133,6 +134,12 @@ def main(args):
         ('nextseq_project2_sample_ids', *check_csv_sample_ids(nextseq_p2,
             expected_ids={'SAM005', 'SAM006', 'SAM007', 'SAM008'},
             forbidden_ids={'SAM001', 'SAM002', 'SAM003', 'SAM004'})),
+    ]:
+        all_checks.append({'test_name': label, 'test_passed': passed, '_msg': msg})
+
+    i100_selected = os.path.join(artifacts_dir, 'i100_20260601_SH00789_0007_ASCQ2G973-SC3_selected_samples.csv')
+    for label, passed, msg in [
+        ('i100_selected_row_count', *check_csv_row_count(i100_selected, 5))
     ]:
         all_checks.append({'test_name': label, 'test_passed': passed, '_msg': msg})
 
