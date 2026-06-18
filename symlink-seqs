@@ -38,7 +38,7 @@ class EnhancedJSONEncoder(json.JSONEncoder):
             return asdict(o)
         if isinstance(o, set):
             return list(o)
-        if isinstance(o, Path):
+        if isinstance(o, os.PathLike):
             return str(o)
         return super().default(o)
 
@@ -85,7 +85,7 @@ def configure_logging(config: Config):
     """
     Configure logging
     """
-    log_level = 'info'
+    log_level = 'error'
     if config.verbose:
         log_level = 'warning'
     logging.basicConfig(
@@ -593,17 +593,20 @@ def select_miseq_samples(run_dir: Path, normalized_sample_ids: Optional[set[str]
     miseq_dir_type = determine_miseq_directory_structure(run_dir)
     fastq_subdir = find_miseq_fastq_subdir(run_dir)
 
-    samplesheet_path = None
+    samplesheet_paths = None
     if miseq_dir_type == 'old':
-        paths = sorted(glob.glob(os.path.join(run_dir, 'SampleSheet*.csv')))
-        if paths:
-            samplesheet_path = paths[0]
+        samplesheet_paths = sorted(glob.glob(os.path.join(run_dir, 'SampleSheet*.csv')))
     elif miseq_dir_type == 'new' and fastq_subdir is not None:
         timestamped_dir = os.path.dirname(os.path.join(run_dir, fastq_subdir))
-        candidate = os.path.join(timestamped_dir, 'SampleSheetUsed.csv')
-        if os.path.exists(candidate):
-            samplesheet_path = candidate
+        samplesheet_paths = sorted(glob.glob(os.path.join(timestamped_dir, 'SampleSheet*.csv')))
 
+    if not samplesheet_paths:
+        logging.warning(f"Failed to find SampleSheet in: {run_dir}")
+        return [], fastq_subdir
+
+    samplesheet_path = samplesheet_paths[0]
+    if len(samplesheet_paths) > 1:
+        logging.warning(f"Found multiple SampleSheets in: {run_dir}. Using: {samplesheet_path}")
     if not samplesheet_path:
         logging.warning(f"Failed to find SampleSheet for run {run_id}")
         return [], fastq_subdir
@@ -654,7 +657,11 @@ def select_nextseq_samples(run_dir: Path, normalized_sample_ids: Optional[set[st
         logging.warning(f"Failed to find SampleSheet in: {run_dir}")
         return [], fastq_subdir
 
-    all_samples = parse_samplesheet_nextseq(samplesheet_paths[0])
+    samplesheet_path = samplesheet_paths[0]
+    if len(samplesheet_paths) > 1:
+        logging.warning(f"Found multiple SampleSheets in: {run_dir}. Using: {samplesheet_path}")
+
+    all_samples = parse_samplesheet_nextseq(samplesheet_path)
     candidate_samples = [s for s in all_samples if has_necessary_fields_for_symlinking(s, 'nextseq')]
     for s in candidate_samples:
         s['sample_id'] = normalize_sample_id(s['sample_id'])
@@ -676,7 +683,7 @@ def select_i100_samples(run_dir: Path, normalized_sample_ids: Optional[set[str]]
 
     normalized_sample_ids should already have underscores converted to hyphens, or be None.
 
-    :param run_dir: Path to the NextSeq run directory
+    :param run_dir: Path to the i100 run directory
     :type run_dir: str
     :param normalized_sample_ids: Set of normalized sample IDs to filter on, or None
     :type normalized_sample_ids: set[str]|None
@@ -697,7 +704,11 @@ def select_i100_samples(run_dir: Path, normalized_sample_ids: Optional[set[str]]
         logging.warning(f"Failed to find SampleSheet in: {run_dir}")
         return [], fastq_subdir
 
-    all_samples = parse_samplesheet_nextseq(samplesheet_paths[0])
+    samplesheet_path = samplesheet_paths[0]
+    if len(samplesheet_paths) > 1:
+        logging.warning(f"Found multiple SampleSheets in: {run_dir}. Using: {samplesheet_path}")
+
+    all_samples = parse_samplesheet_i100(samplesheet_path)
     candidate_samples = [s for s in all_samples if has_necessary_fields_for_symlinking(s, 'i100')]
     for s in candidate_samples:
         s['sample_id'] = normalize_sample_id(s['sample_id'])
@@ -869,12 +880,12 @@ def check_qc_status(run_dir, verbose=False):
         return None
 
 
-def should_skip_run(run_dir: os.PathLike, config: Config, run_id: str, verbose: bool=False) -> tuple[bool, Optional[str]]:
+def should_skip_run(run_dir: Path, config: Config, run_id: str) -> tuple[bool, Optional[str]]:
     """
     Determine whether a sequencing run should be skipped due to exclusion rules or QC status.
 
     :param run_dir:
-    :type run_dir: str
+    :type run_dir: Path
     :param config:
     :type config: Config
     :param run_id:
@@ -896,6 +907,7 @@ def should_skip_run(run_dir: os.PathLike, config: Config, run_id: str, verbose: 
 def main(config: Config):
     
     # jdump(config)
+    # exit()
 
     if not config.csv and not config.outdir:
         logging.error('Please provide -o or --outdir when creating symlinks')
@@ -926,10 +938,9 @@ def main(config: Config):
         for run_dir in run_dirs:
             run_id = run_dir.name
 
-            skip, reason = should_skip_run(Path(run_dir), config, run_id, config.verbose)
+            skip, reason = should_skip_run(Path(run_dir), config, run_id)
             if skip:
-                if config.verbose:
-                    logging.info(f"Skipping run {run_id}: {reason}")
+                logging.warning(f"Skipping run {run_id}: {reason}")
                 continue
 
             # Apply per-run library exclusions to the sample ID filter set.
