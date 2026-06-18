@@ -26,4 +26,4 @@
  :starting-date "2026-06-01"
  :run-interval-ms 500
  :mark-upload-complete true
- :mark-qc-check-complete true}
+ :mark-qc-check-complete false}

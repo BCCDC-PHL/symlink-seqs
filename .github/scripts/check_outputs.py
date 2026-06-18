@@ -24,9 +24,12 @@ def collect_qc_status_by_run_id(simulated_runs_dir):
     for run_dir in simulated_run_dirs:
         run_id = os.path.basename(run_dir)
         qc_check_complete_file = os.path.join(run_dir, 'qc_check_complete.json')
-        with open(qc_check_complete_file, 'r') as f:
-            qc_check = json.load(f)
-            qc_status_by_run_id[run_id] = qc_check['overall_pass_fail']
+        try:
+            with open(qc_check_complete_file, 'r') as f:
+                qc_check = json.load(f)
+                qc_status_by_run_id[run_id] = qc_check['overall_pass_fail']
+        except Exception as e:
+            print(f"Failed to collect QC status for run: {run_id}")
 
     return qc_status_by_run_id
 
