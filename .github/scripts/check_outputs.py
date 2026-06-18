@@ -140,9 +140,9 @@ def main(args):
     ]:
         all_checks.append({'test_name': label, 'test_passed': passed, '_msg': msg})
 
-    i100_selected = os.path.join(artifacts_dir, 'i100_20260601_SH00789_0007_ASCQ2G973-SC3_selected_samples.csv')
+    i100_selected = os.path.join(artifacts_dir, 'i100_20260601_SH00789_0007_ASC2286792-SC3_selected_samples.csv')
     for label, passed, msg in [
-        ('i100_selected_row_count', *check_csv_row_count(i100_selected, 5))
+        ('i100_selected_row_count', *check_csv_row_count(i100_selected, 4))
     ]:
         all_checks.append({'test_name': label, 'test_passed': passed, '_msg': msg})
 
