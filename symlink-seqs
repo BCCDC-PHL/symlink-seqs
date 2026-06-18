@@ -880,7 +880,7 @@ def check_qc_status(run_dir, verbose=False):
         return None
 
 
-def should_skip_run(run_dir: Path, config: Config, run_id: str) -> tuple[bool, Optional[str]]:
+def should_skip_run(config: Config, run_dir: Path) -> tuple[bool, Optional[str]]:
     """
     Determine whether a sequencing run should be skipped due to exclusion rules or QC status.
 
@@ -890,15 +890,14 @@ def should_skip_run(run_dir: Path, config: Config, run_id: str) -> tuple[bool, O
     :type config: Config
     :param run_id:
     :type run_id: str
-    :param verbose:
-    :type verbose: bool
     :return: (skip, reason) tuple
     :rtype: tuple[bool, str|None]
     """
+    run_id = run_dir.name
     if run_id in config.excluded_runs:
         return True, "excluded"
     if not config.skip_qc_status_check:
-        qc_status = check_qc_status(run_dir, verbose)
+        qc_status = check_qc_status(run_dir)
         if qc_status != 'PASS':
             return True, f"QC status {qc_status!r}"
     return False, None
@@ -938,7 +937,7 @@ def main(config: Config):
         for run_dir in run_dirs:
             run_id = run_dir.name
 
-            skip, reason = should_skip_run(Path(run_dir), config, run_id)
+            skip, reason = should_skip_run(config, run_dir)
             if skip:
                 logging.warning(f"Skipping run {run_id}: {reason}")
                 continue
