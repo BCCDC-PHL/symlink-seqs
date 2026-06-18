@@ -38,6 +38,8 @@ class EnhancedJSONEncoder(json.JSONEncoder):
             return asdict(o)
         if isinstance(o, set):
             return list(o)
+        if isinstance(o, Path):
+            return str(o)
         return super().default(o)
 
 @dataclass
@@ -88,7 +90,7 @@ def configure_logging(config: Config):
         log_level = 'warning'
     logging.basicConfig(
         level=str.upper(log_level),
-        format='%(asctime)s %(levelname)s: %(filename)s (line %(lineno)d): %(message)s',
+        format='%(asctime)s %(levelname)s: %(filename)s (%(funcName)s, line %(lineno)d): %(message)s',
         datefmt='%Y-%m-%dT%H:%M:%S'
     )
 
@@ -571,7 +573,7 @@ def simplify_fastq_filename(sample_id, original_filename):
     return dest_filename
 
 
-def select_miseq_samples(run_dir, normalized_sample_ids, project_id, verbose=False):
+def select_miseq_samples(run_dir: Path, normalized_sample_ids: Optional[set[str]], project_id: Optional[str]=None):
     """
     Locate the MiSeq SampleSheet and return samples matching the given IDs or project,
     together with the path to the fastq subdirectory.
@@ -579,7 +581,7 @@ def select_miseq_samples(run_dir, normalized_sample_ids, project_id, verbose=Fal
     normalized_sample_ids should already have underscores converted to hyphens, or be None.
 
     :param run_dir: Path to the MiSeq run directory
-    :type run_dir: str
+    :type run_dir: Path
     :param normalized_sample_ids: Set of normalized sample IDs to filter on, or None
     :type normalized_sample_ids: set[str]|None
     :param project_id: Project ID to filter on, or None
@@ -587,7 +589,7 @@ def select_miseq_samples(run_dir, normalized_sample_ids, project_id, verbose=Fal
     :return: (selected_samples, fastq_subdir)
     :rtype: tuple[list[dict], str|None]
     """
-    run_id = os.path.basename(run_dir.rstrip('/'))
+    run_id = run_dir.name
     miseq_dir_type = determine_miseq_directory_structure(run_dir)
     fastq_subdir = find_miseq_fastq_subdir(run_dir)
 
@@ -603,8 +605,7 @@ def select_miseq_samples(run_dir, normalized_sample_ids, project_id, verbose=Fal
             samplesheet_path = candidate
 
     if not samplesheet_path:
-        if verbose:
-            logging.warning(f"Failed to find SampleSheet for run {run_id}")
+        logging.warning(f"Failed to find SampleSheet for run {run_id}")
         return [], fastq_subdir
 
     all_samples = parse_samplesheet_miseq(samplesheet_path)
@@ -625,7 +626,7 @@ def select_miseq_samples(run_dir, normalized_sample_ids, project_id, verbose=Fal
     return selected, fastq_subdir
 
 
-def select_nextseq_samples(run_dir, normalized_sample_ids, project_id, verbose=False):
+def select_nextseq_samples(run_dir: Path, normalized_sample_ids: Optional[set[str]], project_id: Optional[str]=None):
     """
     Locate the NextSeq SampleSheet and return samples matching the given IDs or project,
     together with the path to the fastq subdirectory.
@@ -641,18 +642,16 @@ def select_nextseq_samples(run_dir, normalized_sample_ids, project_id, verbose=F
     :return: (selected_samples, fastq_subdir)
     :rtype: tuple[list[dict], str|None]
     """
-    run_id = os.path.basename(run_dir.rstrip('/'))
+    run_id = run_dir.name
     analysis_subdir = get_latest_analysis_subdir(run_dir)
     if analysis_subdir is None:
-        if verbose:
-            logging.warning(f"No Analysis directory found for run {run_id}")
+        logging.warning(f"No Analysis directory found for run {run_id}")
         return [], None
 
     fastq_subdir = os.path.join(analysis_subdir, 'Data', 'fastq')
     samplesheet_paths = sorted(glob.glob(os.path.join(analysis_subdir, 'Data', 'SampleSheet*.csv')))
     if not samplesheet_paths:
-        if verbose:
-            logging.warning(f"Failed to find SampleSheet in: {run_dir}")
+        logging.warning(f"Failed to find SampleSheet in: {run_dir}")
         return [], fastq_subdir
 
     all_samples = parse_samplesheet_nextseq(samplesheet_paths[0])
@@ -670,7 +669,7 @@ def select_nextseq_samples(run_dir, normalized_sample_ids, project_id, verbose=F
     return selected, fastq_subdir
 
 
-def select_i100_samples(run_dir, normalized_sample_ids, project_id, verbose=False):
+def select_i100_samples(run_dir: Path, normalized_sample_ids: Optional[set[str]], project_id: Optional[str]=None):
     """
     Locate the i100 SampleSheet and return samples matching the given IDs or project,
     together with the path to the fastq subdirectory.
@@ -686,22 +685,20 @@ def select_i100_samples(run_dir, normalized_sample_ids, project_id, verbose=Fals
     :return: (selected_samples, fastq_subdir)
     :rtype: tuple[list[dict], str|None]
     """
-    run_id = os.path.basename(run_dir.rstrip('/'))
+    run_id = run_dir.name
     analysis_subdir = get_latest_analysis_subdir(run_dir)
     if analysis_subdir is None:
-        if verbose:
-            print(f"WARNING: No Analysis directory found for run {run_id}", file=sys.stderr)
+        logging.warning(f"No Analysis directory found for run {run_id}")
         return [], None
 
     fastq_subdir = os.path.join(analysis_subdir, 'Data', 'BCLConvert', 'fastq')
-    samplesheet_paths = sorted(glob.glob(os.path.join(analysis_subdir, 'Data', 'SampleSheet*.csv')))
+    samplesheet_paths = sorted(glob.glob(os.path.join(analysis_subdir, 'inputs', 'SampleSheet*.csv')))
     if not samplesheet_paths:
-        if verbose:
-            logging.warning(f"Failed to find SampleSheet in: {run_dir}")
+        logging.warning(f"Failed to find SampleSheet in: {run_dir}")
         return [], fastq_subdir
 
     all_samples = parse_samplesheet_nextseq(samplesheet_paths[0])
-    candidate_samples = [s for s in all_samples if has_necessary_fields_for_symlinking(s, 'nextseq')]
+    candidate_samples = [s for s in all_samples if has_necessary_fields_for_symlinking(s, 'i100')]
     for s in candidate_samples:
         s['sample_id'] = normalize_sample_id(s['sample_id'])
 
@@ -715,7 +712,7 @@ def select_i100_samples(run_dir, normalized_sample_ids, project_id, verbose=Fals
     return selected, fastq_subdir
 
 
-def select_gridion_samples(run_dir, normalized_sample_ids, project_id, verbose=False):
+def select_gridion_samples(run_dir: Path, normalized_sample_ids: Optional[set[str]], project_id: Optional[str]=None):
     """
     Locate the GridION SampleSheet and return samples matching the given IDs or project,
     together with the path to the fastq subdirectory.
@@ -731,12 +728,11 @@ def select_gridion_samples(run_dir, normalized_sample_ids, project_id, verbose=F
     :return: (selected_samples, fastq_subdir)
     :rtype: tuple[list[dict], str|None]
     """
-    run_id = os.path.basename(run_dir.rstrip('/'))
+    run_id = run_dir.name
     fastq_subdir = "fastq_pass_combined"
     samplesheet_paths = sorted(glob.glob(os.path.join(run_dir, 'sample_sheet_*.csv')))
     if not samplesheet_paths:
-        if verbose:
-            print(f"WARNING: Failed to find SampleSheet in: {run_dir}", file=sys.stderr)
+        logging.warning(f"Failed to find SampleSheet in: {run_dir}")
         return [], fastq_subdir
 
     all_samples = parse_samplesheet_gridion(samplesheet_paths[0])
@@ -754,12 +750,12 @@ def select_gridion_samples(run_dir, normalized_sample_ids, project_id, verbose=F
     return selected, fastq_subdir
 
 
-def get_fastq_paths(config, run_dir, sample_ids, project_id, verbose=False):
+def get_fastq_paths(config: Config, run_dir: Path, sample_ids, project_id):
     """
     Get paths to source and destination of fastq files for a single run directory.
 
-    :param config: Merged config dict
-    :type config: dict[str, object]
+    :param config: App config.
+    :type config: Config
     :param run_dir: Path to the sequencing run directory
     :type run_dir: str
     :param sample_ids: Collection of sample IDs to filter on, or empty/None for no ID filter
@@ -769,7 +765,7 @@ def get_fastq_paths(config, run_dir, sample_ids, project_id, verbose=False):
     :return: List of FastqFile records
     :rtype: list[FastqFile]
     """
-    run_id = os.path.basename(run_dir.rstrip('/'))
+    run_id = run_dir.name
     sequencer_type = determine_sequencer_type(run_id)
     if sequencer_type is None:
         return []
@@ -778,13 +774,13 @@ def get_fastq_paths(config, run_dir, sample_ids, project_id, verbose=False):
     normalized_sample_ids = {normalize_sample_id(s) for s in sample_ids} if sample_ids else None
 
     if sequencer_type == 'miseq':
-        selected_samples, fastq_subdir = select_miseq_samples(run_dir, normalized_sample_ids, project_id, verbose)
+        selected_samples, fastq_subdir = select_miseq_samples(run_dir, normalized_sample_ids, project_id)
     elif sequencer_type == 'nextseq':
-        selected_samples, fastq_subdir = select_nextseq_samples(run_dir, normalized_sample_ids, project_id, verbose)
+        selected_samples, fastq_subdir = select_nextseq_samples(run_dir, normalized_sample_ids, project_id)
     elif sequencer_type == 'i100':
-        selected_samples, fastq_subdir = select_i100_samples(run_dir, normalized_sample_ids, project_id, verbose)
+        selected_samples, fastq_subdir = select_i100_samples(run_dir, normalized_sample_ids, project_id)
     elif sequencer_type == 'gridion':
-        selected_samples, fastq_subdir = select_gridion_samples(run_dir, normalized_sample_ids, project_id, verbose)
+        selected_samples, fastq_subdir = select_gridion_samples(run_dir, normalized_sample_ids, project_id)
     else:
         return []
 
@@ -806,7 +802,7 @@ def get_fastq_paths(config, run_dir, sample_ids, project_id, verbose=False):
                 src = os.path.abspath(path)
                 dest_filename = os.path.basename(path)
                 resolved_id = dest_filename.split('_')[0]
-                if config.get('simplify_sample_id'):
+                if config.simplify_sample_id:
                     dest_filename = simplify_fastq_filename(resolved_id, dest_filename)
                 fastq_files.append(FastqFile(src=src, dest_filename=dest_filename, sample_id=resolved_id))
 
@@ -862,16 +858,14 @@ def check_qc_status(run_dir, verbose=False):
     """
     qc_status_path = os.path.join(run_dir, 'qc_check_complete.json')
     if not os.path.exists(qc_status_path):
-        if verbose:
-            print("WARNING: QC check file not found in: " + run_dir, file=sys.stderr)
+        logging.warning(f"QC check file not found in: {run_dir}")
         return None
     try:
         with open(qc_status_path, 'r') as f:
             qc_check = json.load(f)
         return qc_check.get('overall_pass_fail')
     except (json.decoder.JSONDecodeError, KeyError) as e:
-        if verbose:
-            print(f"WARNING: Failed to parse QC check file in {run_dir}: {e}", file=sys.stderr)
+        logging.warning(f"Failed to parse QC check file in {run_dir}: {e}")
         return None
 
 
@@ -901,10 +895,10 @@ def should_skip_run(run_dir: os.PathLike, config: Config, run_id: str, verbose: 
 
 def main(config: Config):
     
-    jdump(config)
+    # jdump(config)
 
     if not config.csv and not config.outdir:
-        print('ERROR: Please provide -o or --outdir when creating symlinks')
+        logging.error('Please provide -o or --outdir when creating symlinks')
         exit(-1)
 
     if config.outdir and not os.path.exists(config.outdir):
@@ -922,24 +916,20 @@ def main(config: Config):
         writer.writeheader()
 
     for run_parent_dir in config.sequencing_run_parent_dirs:
-        print(run_parent_dir)
-        run_parent_dir_contents = list(map(lambda x: os.path.abspath(os.path.join(run_parent_dir, x)), os.listdir(run_parent_dir)))
+        run_parent_dir_contents = list(map(lambda x: Path(os.path.abspath(os.path.join(run_parent_dir, x))), os.listdir(run_parent_dir)))
         run_dirs = list(filter(lambda x: os.path.isdir(x), run_parent_dir_contents))
-        print(json.dumps(run_parent_dir_contents, indent=2))
 
         # If a run ID is supplied by the `--run-id` flag, only process that run.
         if config.run_id:
-            run_dirs = list(filter(lambda x: os.path.basename(x) == config.run_id, run_dirs))
-
-        print(json.dumps(run_dirs, indent=2))
+            run_dirs = list(filter(lambda x: x.name == config.run_id, run_dirs))
 
         for run_dir in run_dirs:
-            run_id = os.path.basename(run_dir.rstrip('/'))
+            run_id = run_dir.name
 
             skip, reason = should_skip_run(Path(run_dir), config, run_id, config.verbose)
             if skip:
                 if config.verbose:
-                    print(f"INFO: Skipping run {run_id}: {reason}", file=sys.stderr)
+                    logging.info(f"Skipping run {run_id}: {reason}")
                 continue
 
             # Apply per-run library exclusions to the sample ID filter set.
@@ -953,7 +943,7 @@ def main(config: Config):
             else:
                 effective_sample_ids = None
 
-            fastq_files = get_fastq_paths(config, run_dir, effective_sample_ids, config.project_id, config.verbose)
+            fastq_files = get_fastq_paths(config, run_dir, effective_sample_ids, config.project_id)
 
             if config.copy:
                 create_copies(fastq_files, config.outdir)
