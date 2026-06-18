@@ -2,24 +2,45 @@
 
 import argparse
 import csv
-from dataclasses import dataclass
 import glob
+import logging
 import json
 import os
 import shutil
 import sys
 import re
 
-VERSION = "0.1.1"
+from dataclasses import (
+    dataclass,
+    field,
+    fields,
+    is_dataclass,
+    asdict
+)
+from pathlib import Path
+from typing import (Optional)
+
+VERSION = "0.1.2"
 
 # Run ID patterns for each supported sequencer type.
 MISEQ_RUN_ID_REGEX = r'\d{6}_M\d{5}_\d{4}_\d{9}-[A-Z0-9]{5}'
 NEXTSEQ_RUN_ID_REGEX = r'\d{6}_VH\d{5}_\d+_[A-Z0-9]{9}'
+I100_RUN_ID_REGEX = r'\d{8}_SH\d{5}_\d+_[A-Z0-9]{10}-[A-Z0-9]{3}'
 GRIDION_RUN_ID_REGEX = r'\d{8}_\d{4}_X\d_[A-Z]{3}\d+_[a-z0-9]{8}'
 
 # Pattern for extracting read type (R1, R2, RL) from fastq filenames.
 READ_TYPE_REGEX = r'_(R[12L])[_\.]'
 
+# Helper fn for serializing json 
+class EnhancedJSONEncoder(json.JSONEncoder):
+    def default(self, o):
+        if is_dataclass(o):
+            return asdict(o)
+        if isinstance(o, set):
+            return list(o)
+        if isinstance(o, os.PathLike):
+            return str(o)
+        return super().default(o)
 
 @dataclass
 class FastqFile:
@@ -28,12 +49,52 @@ class FastqFile:
     dest_filename: str
     sample_id: str
 
+@dataclass
+class Config:
+    sequencing_run_parent_dirs: list[os.PathLike] = field(default_factory=list)
+    project_id: Optional[str] = None
+    run_id: Optional[str] = None
+    simplify_sample_id: bool = False
+    skip_qc_status_check: bool = False
+    verbose: bool = False
+    excluded_runs_file: Optional[os.PathLike] = None
+    excluded_libraries_file: Optional[os.PathLike] = None
+    excluded_runs: set[str] = field(default_factory=set)
+    excluded_libraries_by_sequencing_run_id: dict = field(default_factory=dict)
+    outdir: Optional[os.PathLike] = None
+    copy: bool = False
+    csv: bool = False
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        # Get all valid field names for this dataclass
+        valid_fields = {f.name for f in fields(cls)}
+        # Filter the input dictionary
+        filtered_data = {k: v for k, v in data.items() if k in valid_fields}
+        return cls(**filtered_data)
+
 
 def jdump(x):
     """
     Convenience method for debugging.
     """
-    print(json.dumps(x, indent=2))
+    print(json.dumps(x, indent=2, cls=EnhancedJSONEncoder))
+
+
+def configure_logging(config: Config):
+    """
+    Configure logging
+    """
+    log_level = 'error'
+    if config.verbose:
+        log_level = 'warning'
+    logging.basicConfig(
+        level=str.upper(log_level),
+        format='%(asctime)s %(levelname)s: %(filename)s (%(funcName)s, line %(lineno)d): %(message)s',
+        datefmt='%Y-%m-%dT%H:%M:%S'
+    )
+
+    return None
 
 
 def parse_excluded_runs_file(excluded_runs_file):
@@ -80,78 +141,98 @@ def parse_config(config_path):
     :param config_path:
     :type config_path: str
     :return: config
-    :rtype: dict[str, object]
+    :rtype: Config
     """
-    config = {}
-    if os.path.exists(config_path):
-        with open(config_path, 'r') as f:
-            try:
-                config = json.load(f)
-            except json.decoder.JSONDecodeError as e:
-                print("ERROR: Error parsing config file: " + config_path, file=sys.stderr)
-                print(e, file=sys.stderr)
-                exit(-1)
-        if 'excluded_runs_file' in config and os.path.exists(config['excluded_runs_file']):
-            config['excluded_runs'] = parse_excluded_runs_file(config['excluded_runs_file'])
-        else:
-            config['excluded_runs'] = set()
+    config_dict = {}
+    if not os.path.exists(config_path):
+        logging.error(f"Config file does not exist: {config_path}")
+        exit(-1)
 
-        if 'excluded_libraries_file' in config and os.path.exists(config['excluded_libraries_file']):
-            config['excluded_libraries_by_sequencing_run_id'] = parse_excluded_libraries_file(config['excluded_libraries_file'])
-        else:
-            config['excluded_libraries_by_sequencing_run_id'] = {}
-            
+    with open(config_path, 'r') as f:
+        try:
+            config_dict = json.load(f)
+        except json.decoder.JSONDecodeError as e:
+            logging.error(f"Error parsing config file: {config_path}")
+            print(e, file=sys.stderr)
+            exit(-1)
+
+    if 'excluded_runs_file' in config_dict and os.path.exists(config_dict['excluded_runs_file']):
+        config_dict['excluded_runs'] = parse_excluded_runs_file(config_dict['excluded_runs_file'])
     else:
-        print("ERROR: config file does not exist: " + config_path, file=sys.stderr)
-        exit(-1)
+        config_dict['excluded_runs'] = set()
 
-    if 'sequencing_run_parent_dirs' not in config:
-        print("ERROR: Config file missing required key 'sequencing_run_parent_dirs': " + config_path, file=sys.stderr)
+    if 'excluded_libraries_file' in config_dict and os.path.exists(config_dict['excluded_libraries_file']):
+        config_dict['excluded_libraries_by_sequencing_run_id'] = parse_excluded_libraries_file(config_dict['excluded_libraries_file'])
+    else:
+        config_dict['excluded_libraries_by_sequencing_run_id'] = {}
+
+    if 'outdir' not in config_dict:
+        config_dict['outdir'] = None
+
+    if 'copy' not in config_dict:
+        config_dict['copy'] = False
+
+    if 'csv' not in config_dict:
+        config_dict['csv'] = False
+
+    if 'sequencing_run_parent_dirs' not in config_dict:
+        logging.error(f"Config file missing required key 'sequencing_run_parent_dirs': {config_path}")
         exit(-1)
+    
+    config = Config(**config_dict)
 
     return config
 
 
-def merge_config_with_args(config, args):
+def merge_config_with_args(config: Config, args):
     """
     Over-write any config values supplied as command-line args.
 
     :param config: Parsed config from file.
-    :type config: dict[str, object]
+    :type config: Config
     :param args: command-line args.
     :type args: argparse.Namespace
     :return: merged config
-    :rtype: dict[str, object]
+    :rtype: Config
     """
-    if 'simplify_sample_id' not in config:
-        config['simplify_sample_id'] = args.simplify_sample_id
-    if 'outdir' not in config:
-        config['outdir'] = args.outdir
-    if 'copy' not in config:
-        config['copy'] = args.copy
-    if 'csv' not in config:
-        config['csv'] = args.csv
-    # Project ID from command-line overrides project ID in config.
+
+    if args.simplify_sample_id:
+        config.simplify_sample_id = args.simplify_sample_id
+
+    if args.outdir:
+        config.outdir = args.outdir
+
+    if args.copy:
+        config.copy = args.copy
+
+    if args.csv:
+        config.csv = args.csv
+
     if args.project_id:
-        config['project_id'] = args.project_id
-    if 'skip_qc_status_check' not in config:
-        config['skip_qc_status_check'] = args.skip_qc_status_check
-    if 'verbose' not in config:
-        config['verbose'] = args.verbose
+        config.project_id = args.project_id
+
+    if args.run_id:
+        config.run_id = args.run_id
+
+    if args.skip_qc_status_check:
+        config.skip_qc_status_check = args.skip_qc_status_check
+
+    if args.verbose:
+        config.verbose = args.verbose
 
     if args.exclude_run is not None:
-        config['excluded_runs'].add(args.exclude_run)
+        config.excluded_runs.add(args.exclude_run)
 
     if args.excluded_runs_file is not None:
         excluded_runs_from_args = parse_excluded_runs_file(args.excluded_runs_file)
-        config['excluded_runs'] = config['excluded_runs'].union(excluded_runs_from_args)
+        config.excluded_runs = config.excluded_runs.union(excluded_runs_from_args)
 
     if args.excluded_libraries_file is not None:
         excluded_libraries_from_args = parse_excluded_libraries_file(args.excluded_libraries_file)
         for run_id, libraries in excluded_libraries_from_args.items():
-            if run_id not in config['excluded_libraries_by_sequencing_run_id']:
-                config['excluded_libraries_by_sequencing_run_id'][run_id] = set()
-            config['excluded_libraries_by_sequencing_run_id'][run_id] = config['excluded_libraries_by_sequencing_run_id'][run_id].union(libraries)
+            if run_id not in config.excluded_libraries_by_sequencing_run_id:
+                config.excluded_libraries_by_sequencing_run_id[run_id] = set()
+            config.excluded_libraries_by_sequencing_run_id[run_id] = config.excluded_libraries_by_sequencing_run_id[run_id].union(libraries)
 
     return config
 
@@ -186,6 +267,8 @@ def determine_sequencer_type(run_id):
         return "nextseq"
     elif re.match(GRIDION_RUN_ID_REGEX, run_id):
         return "gridion"
+    elif re.match(I100_RUN_ID_REGEX, run_id):
+        return "i100"
     return None
 
 
@@ -303,6 +386,21 @@ def parse_samplesheet_nextseq(samplesheet_path):
     return cloud_data
 
 
+def parse_samplesheet_i100(samplesheet_path):
+    """
+    Parse a MiSeq i100 SampleSheet to get sample and project IDs
+    currently just re-uses NextSeq samplesheet parser, as they use the same format.
+
+    :param samplesheet_path: Path to SampleSheet.csv file.
+    :type samplesheet_path: str
+    :return: List of sample records from SampleSheet.
+    :rtype: list[dict[str, object]]
+    """
+    cloud_data = parse_samplesheet_nextseq(samplesheet_path)
+
+    return cloud_data
+
+
 def parse_samplesheet_gridion(samplesheet_path):
     """
     Parse an ONT GridION sample sheet, extracting sample_id and project_id from the alias field.
@@ -367,8 +465,11 @@ def has_necessary_fields_for_symlinking(sample, sequencer_type):
         return 'sample_project' in sample
     elif sequencer_type == 'nextseq':
         return bool(sample.get('sample_id')) and 'project_name' in sample
+    elif sequencer_type == 'i100':
+        return bool(sample.get('sample_id')) and 'project_name' in sample
     elif sequencer_type == 'gridion':
         return bool(sample.get('sample_id'))
+    
     return False
 
 
@@ -472,7 +573,7 @@ def simplify_fastq_filename(sample_id, original_filename):
     return dest_filename
 
 
-def select_miseq_samples(run_dir, normalized_sample_ids, project_id, verbose=False):
+def select_miseq_samples(run_dir: Path, normalized_sample_ids: Optional[set[str]], project_id: Optional[str]=None):
     """
     Locate the MiSeq SampleSheet and return samples matching the given IDs or project,
     together with the path to the fastq subdirectory.
@@ -480,7 +581,7 @@ def select_miseq_samples(run_dir, normalized_sample_ids, project_id, verbose=Fal
     normalized_sample_ids should already have underscores converted to hyphens, or be None.
 
     :param run_dir: Path to the MiSeq run directory
-    :type run_dir: str
+    :type run_dir: Path
     :param normalized_sample_ids: Set of normalized sample IDs to filter on, or None
     :type normalized_sample_ids: set[str]|None
     :param project_id: Project ID to filter on, or None
@@ -488,24 +589,26 @@ def select_miseq_samples(run_dir, normalized_sample_ids, project_id, verbose=Fal
     :return: (selected_samples, fastq_subdir)
     :rtype: tuple[list[dict], str|None]
     """
-    run_id = os.path.basename(run_dir.rstrip('/'))
+    run_id = run_dir.name
     miseq_dir_type = determine_miseq_directory_structure(run_dir)
     fastq_subdir = find_miseq_fastq_subdir(run_dir)
 
-    samplesheet_path = None
+    samplesheet_paths = None
     if miseq_dir_type == 'old':
-        paths = sorted(glob.glob(os.path.join(run_dir, 'SampleSheet*.csv')))
-        if paths:
-            samplesheet_path = paths[0]
+        samplesheet_paths = sorted(glob.glob(os.path.join(run_dir, 'SampleSheet*.csv')))
     elif miseq_dir_type == 'new' and fastq_subdir is not None:
         timestamped_dir = os.path.dirname(os.path.join(run_dir, fastq_subdir))
-        candidate = os.path.join(timestamped_dir, 'SampleSheetUsed.csv')
-        if os.path.exists(candidate):
-            samplesheet_path = candidate
+        samplesheet_paths = sorted(glob.glob(os.path.join(timestamped_dir, 'SampleSheet*.csv')))
 
+    if not samplesheet_paths:
+        logging.warning(f"Failed to find SampleSheet in: {run_dir}")
+        return [], fastq_subdir
+
+    samplesheet_path = samplesheet_paths[0]
+    if len(samplesheet_paths) > 1:
+        logging.warning(f"Found multiple SampleSheets in: {run_dir}. Using: {samplesheet_path}")
     if not samplesheet_path:
-        if verbose:
-            print(f"WARNING: Failed to find SampleSheet for run {run_id}", file=sys.stderr)
+        logging.warning(f"Failed to find SampleSheet for run {run_id}")
         return [], fastq_subdir
 
     all_samples = parse_samplesheet_miseq(samplesheet_path)
@@ -526,7 +629,7 @@ def select_miseq_samples(run_dir, normalized_sample_ids, project_id, verbose=Fal
     return selected, fastq_subdir
 
 
-def select_nextseq_samples(run_dir, normalized_sample_ids, project_id, verbose=False):
+def select_nextseq_samples(run_dir: Path, normalized_sample_ids: Optional[set[str]], project_id: Optional[str]=None):
     """
     Locate the NextSeq SampleSheet and return samples matching the given IDs or project,
     together with the path to the fastq subdirectory.
@@ -542,21 +645,23 @@ def select_nextseq_samples(run_dir, normalized_sample_ids, project_id, verbose=F
     :return: (selected_samples, fastq_subdir)
     :rtype: tuple[list[dict], str|None]
     """
-    run_id = os.path.basename(run_dir.rstrip('/'))
+    run_id = run_dir.name
     analysis_subdir = get_latest_analysis_subdir(run_dir)
     if analysis_subdir is None:
-        if verbose:
-            print(f"WARNING: No Analysis directory found for run {run_id}", file=sys.stderr)
+        logging.warning(f"No Analysis directory found for run {run_id}")
         return [], None
 
     fastq_subdir = os.path.join(analysis_subdir, 'Data', 'fastq')
     samplesheet_paths = sorted(glob.glob(os.path.join(analysis_subdir, 'Data', 'SampleSheet*.csv')))
     if not samplesheet_paths:
-        if verbose:
-            print(f"WARNING: Failed to find SampleSheet in: {run_dir}", file=sys.stderr)
+        logging.warning(f"Failed to find SampleSheet in: {run_dir}")
         return [], fastq_subdir
 
-    all_samples = parse_samplesheet_nextseq(samplesheet_paths[0])
+    samplesheet_path = samplesheet_paths[0]
+    if len(samplesheet_paths) > 1:
+        logging.warning(f"Found multiple SampleSheets in: {run_dir}. Using: {samplesheet_path}")
+
+    all_samples = parse_samplesheet_nextseq(samplesheet_path)
     candidate_samples = [s for s in all_samples if has_necessary_fields_for_symlinking(s, 'nextseq')]
     for s in candidate_samples:
         s['sample_id'] = normalize_sample_id(s['sample_id'])
@@ -571,7 +676,54 @@ def select_nextseq_samples(run_dir, normalized_sample_ids, project_id, verbose=F
     return selected, fastq_subdir
 
 
-def select_gridion_samples(run_dir, normalized_sample_ids, project_id, verbose=False):
+def select_i100_samples(run_dir: Path, normalized_sample_ids: Optional[set[str]], project_id: Optional[str]=None):
+    """
+    Locate the i100 SampleSheet and return samples matching the given IDs or project,
+    together with the path to the fastq subdirectory.
+
+    normalized_sample_ids should already have underscores converted to hyphens, or be None.
+
+    :param run_dir: Path to the i100 run directory
+    :type run_dir: str
+    :param normalized_sample_ids: Set of normalized sample IDs to filter on, or None
+    :type normalized_sample_ids: set[str]|None
+    :param project_id: Project ID to filter on, or None
+    :type project_id: str|None
+    :return: (selected_samples, fastq_subdir)
+    :rtype: tuple[list[dict], str|None]
+    """
+    run_id = run_dir.name
+    analysis_subdir = get_latest_analysis_subdir(run_dir)
+    if analysis_subdir is None:
+        logging.warning(f"No Analysis directory found for run {run_id}")
+        return [], None
+
+    fastq_subdir = os.path.join(analysis_subdir, 'Data', 'BCLConvert', 'fastq')
+    samplesheet_paths = sorted(glob.glob(os.path.join(analysis_subdir, 'inputs', 'SampleSheet*.csv')))
+    if not samplesheet_paths:
+        logging.warning(f"Failed to find SampleSheet in: {run_dir}")
+        return [], fastq_subdir
+
+    samplesheet_path = samplesheet_paths[0]
+    if len(samplesheet_paths) > 1:
+        logging.warning(f"Found multiple SampleSheets in: {run_dir}. Using: {samplesheet_path}")
+
+    all_samples = parse_samplesheet_i100(samplesheet_path)
+    candidate_samples = [s for s in all_samples if has_necessary_fields_for_symlinking(s, 'i100')]
+    for s in candidate_samples:
+        s['sample_id'] = normalize_sample_id(s['sample_id'])
+
+    if normalized_sample_ids:
+        selected = [s for s in candidate_samples if s['sample_id'] in normalized_sample_ids]
+    elif project_id is not None:
+        selected = [s for s in candidate_samples if s['project_name'] == project_id]
+    else:
+        selected = candidate_samples
+
+    return selected, fastq_subdir
+
+
+def select_gridion_samples(run_dir: Path, normalized_sample_ids: Optional[set[str]], project_id: Optional[str]=None):
     """
     Locate the GridION SampleSheet and return samples matching the given IDs or project,
     together with the path to the fastq subdirectory.
@@ -587,12 +739,11 @@ def select_gridion_samples(run_dir, normalized_sample_ids, project_id, verbose=F
     :return: (selected_samples, fastq_subdir)
     :rtype: tuple[list[dict], str|None]
     """
-    run_id = os.path.basename(run_dir.rstrip('/'))
+    run_id = run_dir.name
     fastq_subdir = "fastq_pass_combined"
     samplesheet_paths = sorted(glob.glob(os.path.join(run_dir, 'sample_sheet_*.csv')))
     if not samplesheet_paths:
-        if verbose:
-            print(f"WARNING: Failed to find SampleSheet in: {run_dir}", file=sys.stderr)
+        logging.warning(f"Failed to find SampleSheet in: {run_dir}")
         return [], fastq_subdir
 
     all_samples = parse_samplesheet_gridion(samplesheet_paths[0])
@@ -610,12 +761,12 @@ def select_gridion_samples(run_dir, normalized_sample_ids, project_id, verbose=F
     return selected, fastq_subdir
 
 
-def get_fastq_paths(config, run_dir, sample_ids, project_id, verbose=False):
+def get_fastq_paths(config: Config, run_dir: Path, sample_ids, project_id):
     """
     Get paths to source and destination of fastq files for a single run directory.
 
-    :param config: Merged config dict
-    :type config: dict[str, object]
+    :param config: App config.
+    :type config: Config
     :param run_dir: Path to the sequencing run directory
     :type run_dir: str
     :param sample_ids: Collection of sample IDs to filter on, or empty/None for no ID filter
@@ -625,7 +776,7 @@ def get_fastq_paths(config, run_dir, sample_ids, project_id, verbose=False):
     :return: List of FastqFile records
     :rtype: list[FastqFile]
     """
-    run_id = os.path.basename(run_dir.rstrip('/'))
+    run_id = run_dir.name
     sequencer_type = determine_sequencer_type(run_id)
     if sequencer_type is None:
         return []
@@ -634,11 +785,13 @@ def get_fastq_paths(config, run_dir, sample_ids, project_id, verbose=False):
     normalized_sample_ids = {normalize_sample_id(s) for s in sample_ids} if sample_ids else None
 
     if sequencer_type == 'miseq':
-        selected_samples, fastq_subdir = select_miseq_samples(run_dir, normalized_sample_ids, project_id, verbose)
+        selected_samples, fastq_subdir = select_miseq_samples(run_dir, normalized_sample_ids, project_id)
     elif sequencer_type == 'nextseq':
-        selected_samples, fastq_subdir = select_nextseq_samples(run_dir, normalized_sample_ids, project_id, verbose)
+        selected_samples, fastq_subdir = select_nextseq_samples(run_dir, normalized_sample_ids, project_id)
+    elif sequencer_type == 'i100':
+        selected_samples, fastq_subdir = select_i100_samples(run_dir, normalized_sample_ids, project_id)
     elif sequencer_type == 'gridion':
-        selected_samples, fastq_subdir = select_gridion_samples(run_dir, normalized_sample_ids, project_id, verbose)
+        selected_samples, fastq_subdir = select_gridion_samples(run_dir, normalized_sample_ids, project_id)
     else:
         return []
 
@@ -660,7 +813,7 @@ def get_fastq_paths(config, run_dir, sample_ids, project_id, verbose=False):
                 src = os.path.abspath(path)
                 dest_filename = os.path.basename(path)
                 resolved_id = dest_filename.split('_')[0]
-                if config.get('simplify_sample_id'):
+                if config.simplify_sample_id:
                     dest_filename = simplify_fastq_filename(resolved_id, dest_filename)
                 fastq_files.append(FastqFile(src=src, dest_filename=dest_filename, sample_id=resolved_id))
 
@@ -716,58 +869,51 @@ def check_qc_status(run_dir, verbose=False):
     """
     qc_status_path = os.path.join(run_dir, 'qc_check_complete.json')
     if not os.path.exists(qc_status_path):
-        if verbose:
-            print("WARNING: QC check file not found in: " + run_dir, file=sys.stderr)
+        logging.warning(f"QC check file not found in: {run_dir}")
         return None
     try:
         with open(qc_status_path, 'r') as f:
             qc_check = json.load(f)
         return qc_check.get('overall_pass_fail')
     except (json.decoder.JSONDecodeError, KeyError) as e:
-        if verbose:
-            print(f"WARNING: Failed to parse QC check file in {run_dir}: {e}", file=sys.stderr)
+        logging.warning(f"Failed to parse QC check file in {run_dir}: {e}")
         return None
 
 
-def should_skip_run(run_dir, config, run_id, verbose=False):
+def should_skip_run(config: Config, run_dir: Path) -> tuple[bool, Optional[str]]:
     """
     Determine whether a sequencing run should be skipped due to exclusion rules or QC status.
 
     :param run_dir:
-    :type run_dir: str
+    :type run_dir: Path
     :param config:
-    :type config: dict[str, object]
+    :type config: Config
     :param run_id:
     :type run_id: str
     :return: (skip, reason) tuple
     :rtype: tuple[bool, str|None]
     """
-    if run_id in config.get('excluded_runs', set()):
+    run_id = run_dir.name
+    if run_id in config.excluded_runs:
         return True, "excluded"
-    if not config.get('skip_qc_status_check', False):
-        qc_status = check_qc_status(run_dir, verbose)
+    if not config.skip_qc_status_check:
+        qc_status = check_qc_status(run_dir)
         if qc_status != 'PASS':
             return True, f"QC status {qc_status!r}"
     return False, None
 
 
-def main(args):
-    if args.version:
-        print(f"symlink-seqs v{VERSION}")
-        exit(0)
+def main(config: Config):
+    
+    # jdump(config)
+    # exit()
 
-    config = {}
-    config = parse_config(args.config)
-    config = merge_config_with_args(config, args)
-    verbose = config.get('verbose', False)
-    outdir = config.get('outdir', None)
-
-    if not config.get('csv', False) and not outdir:
-        print('ERROR: Please provide -o or --outdir when creating symlinks')
+    if not config.csv and not config.outdir:
+        logging.error('Please provide -o or --outdir when creating symlinks')
         exit(-1)
 
-    if outdir and not os.path.exists(outdir):
-        os.makedirs(outdir, exist_ok=True)
+    if config.outdir and not os.path.exists(config.outdir):
+        os.makedirs(config.outdir, exist_ok=True)
 
     sample_ids = set()
     if args.ids_file is not None:
@@ -775,30 +921,29 @@ def main(args):
 
     # In csv-mode, write the header once before the run loop.
     writer = None
-    if config.get('csv', False):
+    if config.csv:
         output_fieldnames = ['ID', 'R1', 'R2']
         writer = csv.DictWriter(sys.stdout, fieldnames=output_fieldnames, extrasaction='ignore')
         writer.writeheader()
 
-    for run_parent_dir in config['sequencing_run_parent_dirs']:
-        run_parent_dir_contents = list(map(lambda x: os.path.abspath(os.path.join(run_parent_dir, x)), os.listdir(run_parent_dir)))
+    for run_parent_dir in config.sequencing_run_parent_dirs:
+        run_parent_dir_contents = list(map(lambda x: Path(os.path.abspath(os.path.join(run_parent_dir, x))), os.listdir(run_parent_dir)))
         run_dirs = list(filter(lambda x: os.path.isdir(x), run_parent_dir_contents))
 
         # If a run ID is supplied by the `--run-id` flag, only process that run.
-        if args.run_id is not None:
-            run_dirs = list(filter(lambda x: os.path.basename(x) == args.run_id, run_dirs))
+        if config.run_id:
+            run_dirs = list(filter(lambda x: x.name == config.run_id, run_dirs))
 
         for run_dir in run_dirs:
-            run_id = os.path.basename(run_dir.rstrip('/'))
+            run_id = run_dir.name
 
-            skip, reason = should_skip_run(run_dir, config, run_id, verbose)
+            skip, reason = should_skip_run(config, run_dir)
             if skip:
-                if verbose:
-                    print(f"INFO: Skipping run {run_id}: {reason}", file=sys.stderr)
+                logging.warning(f"Skipping run {run_id}: {reason}")
                 continue
 
             # Apply per-run library exclusions to the sample ID filter set.
-            excluded_libs = config['excluded_libraries_by_sequencing_run_id'].get(run_id, set())
+            excluded_libs = config.excluded_libraries_by_sequencing_run_id.get(run_id, set())
             # When sample_ids were specified but all are excluded for this run, skip the run
             # rather than falling through to project-based selection.
             if sample_ids:
@@ -808,16 +953,16 @@ def main(args):
             else:
                 effective_sample_ids = None
 
-            fastq_files = get_fastq_paths(config, run_dir, effective_sample_ids, config.get('project_id'), verbose)
+            fastq_files = get_fastq_paths(config, run_dir, effective_sample_ids, config.project_id)
 
-            if config.get('copy', False):
-                create_copies(fastq_files, outdir)
-            elif config.get('csv', False):
+            if config.copy:
+                create_copies(fastq_files, config.outdir)
+            elif config.csv:
                 for row in pair_fastq_paths(fastq_files):
                     if writer:
                         writer.writerow(row)
             else:
-                create_symlinks(fastq_files, outdir)
+                create_symlinks(fastq_files, config.outdir)
 
 
 if __name__ == '__main__':
@@ -837,4 +982,14 @@ if __name__ == '__main__':
     parser.add_argument('-v', '--version', action='store_true', help="Print version and exit.")
     parser.add_argument('-o', '--outdir', help="Output directory, where symlinks (or copies) will be created.")
     args = parser.parse_args()
-    main(args)
+
+    if args.version:
+        print(f"symlink-seqs v{VERSION}")
+        exit(0)
+
+    config = parse_config(args.config)
+    config = merge_config_with_args(config, args)
+
+    configure_logging(config)
+    
+    main(config)
