@@ -1,5 +1,7 @@
 *~
-test_*
+test_input
+test_output
+dev_scripts
 dev-config.json
 artifacts
 illumina-run-simulator.jar
